@@ -23,7 +23,7 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 | Tabelle | **TanStack Table** | Paginazione, ordinamento e filtri lato server. È anche la base della tabella di shadcn/ui |
 | Form | **React Hook Form + Zod** | Validazione immediata; gli errori del server finiscono sui campi. Sono gli stessi dei form di shadcn/ui |
 | Client API | **openapi-typescript + openapi-fetch** | Tipi generati dal contratto con il backend: se il backend cambia un campo, il frontend non compila finché non si allinea |
-| Sviluppo senza backend | **MSW** (Mock Service Worker) | Risposte finte basate sul contratto, così frontend e backend procedono in parallelo |
+| Sviluppo senza backend | **MSW** (Mock Service Worker) | Risposte finte basate sul contratto, così frontend e backend procedono in parallelo. Le stesse risposte servono ai test. Il plugin per Vite serve il worker solo in sviluppo |
 | Traduzioni | react-intl | Solo italiano per ora, ma nessun testo scritto direttamente nei componenti |
 | Date | date-fns con locale `it` | Calcoli sulle scadenze (giorni mancanti, rinnovi), che `Intl` non fa |
 | Calcoli in anteprima | big.js | Solo per le anteprime nei form; i totali ufficiali arrivano dal backend |
@@ -126,7 +126,8 @@ src/
   auth/                 AuthProvider, RequireAuth, hook dei permessi
   i18n/                 testi in italiano
   lib/                  formattazione di importi, quantità e date
-  mocks/                risposte finte per sviluppare senza backend
+  mocks/                risposte finte per sviluppare senza backend (dati di prova in data.ts)
+  test/                 avvio di MSW nei test, client di prova con i cookie
 ```
 
 Regole:

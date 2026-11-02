@@ -37,3 +37,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: No mocks in the production build
+        run: |
+          if [ -e dist/mockServiceWorker.js ] || grep -rlE 'mockServiceWorker|\[MSW\]|example\.test' dist; then
+            echo '::error::Mock code or data ended up in the production build'
+            exit 1
+          fi
