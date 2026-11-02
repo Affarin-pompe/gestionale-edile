@@ -28,7 +28,7 @@ Gli altri comandi:
 
 Gli stessi controlli girano su GitHub a ogni pull request. Il titolo della PR deve seguire i Conventional Commits (es. `feat(clienti): elenco con filtri`), perché diventa il commit su `main`.
 
-Quando arriveranno le risposte finte (MSW), l'app funzionerà anche senza backend.
+In sviluppo le API sono simulate con MSW (`src/mocks/`), quindi il backend non serve. Gli utenti di prova e la loro password sono in `src/mocks/data.ts`. A ogni ricaricamento della pagina i dati tornano quelli iniziali; la sessione invece resta.
 
 ## Variabili d'ambiente
 Per ora nessuna. L'elenco è in `.env.example`.
