@@ -15,7 +15,9 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 | Ruolo | Libreria | Perché |
 |---|---|---|
 | Base | **Vite + React 19 + TypeScript** | App separata dal backend, servita come file statici |
-| Componenti | **shadcn/ui** (Radix + Tailwind 4) | Il codice sta nel progetto e ha licenza MIT: si modifica liberamente e può stare in un repository pubblico |
+| Componenti | **shadcn/ui** (Radix + Tailwind 4), stile "nova" | Il codice sta nel progetto e ha licenza MIT: si modifica liberamente e può stare in un repository pubblico. Lo stile "nova" è la variante compatta, adatta a tabelle e form fitti |
+| Supporto ai componenti | radix-ui, class-variance-authority, cn, tw-animate-css | Quelli che shadcn/ui richiede: componenti accessibili, varianti, unione delle classi, animazioni |
+| Carattere | Geist, con i file dentro il progetto (@fontsource) | Niente Google Fonts: la CSP può restare limitata al proprio dominio |
 | Routing | **React Router 7** | Route annidate: layout, azienda nell'URL, schede del cantiere |
 | Dati dal server | **TanStack Query** | Cache, stati di caricamento, aggiornamento dopo le modifiche |
 | Tabelle | **TanStack Table** | Paginazione, ordinamento e filtri lato server. È anche la base della tabella di shadcn/ui |

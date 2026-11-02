@@ -27,5 +27,10 @@ export default defineConfig([
       },
     },
   },
+  {
+    // shadcn/ui components export their variants (e.g. buttonVariants) next to the component
+    files: ['src/components/ui/**/*.tsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
   prettier,
 ])
