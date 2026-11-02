@@ -13,17 +13,18 @@ Frontend React di un gestionale per imprese edili (cantieri, rapportini, scadenz
 - **Deploy:** da decidere; stesso dominio delle API.
 
 ## Comandi
-**[da compilare con la fase 0]**
 
 ```bash
 npm install
 npm run dev
+npm run lint            # ESLint con regole type-aware
+npm run format:check    # Prettier (npm run format per correggere); i .md sono esclusi
+npm run typecheck
 npm test
-npm run lint
 npm run build
 ```
 
-Prima di dichiarare finito un lavoro: test e lint devono passare.
+Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build devono passare. Sono gli stessi controlli della CI (`.github/workflows/ci.yml`).
 
 ## Architettura in 5 righe
 - `src/features/<modulo>/`: un modulo per area, sempre con `api.ts`, `routes.tsx`, `schemas.ts`, `pages/`, `components/`.
@@ -40,7 +41,7 @@ Prima di dichiarare finito un lavoro: test e lint devono passare.
   - 401 riporta al login;
   - 403 mostra un messaggio senza cambiare pagina;
   - 404 apre la pagina "non trovato o non accessibile".
-- Commit in Conventional Commits (`feat:`, `fix:`, `docs:`…). Branch corti da `main`.
+- `main` è protetto: si lavora solo con branch corti e pull request, con merge "squash". Il titolo della PR segue i Conventional Commits (`feat:`, `fix:`, `docs:`…) e lo controlla la CI.
 
 ## Trappole
 - **Il repository è pubblico.** Non vanno committati template ThemeForest, segreti, nomi di sistemi o di progetti interni.

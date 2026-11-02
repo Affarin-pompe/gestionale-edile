@@ -3,22 +3,34 @@
 ## Cos'è
 L'interfaccia web di un gestionale per imprese edili. Copre cantieri, rapportini giornalieri, documenti e scadenze, costi e anagrafiche. È un'app React separata dal backend, con cui parla solo via API.
 
-Il progetto è all'inizio: per ora ci sono la struttura e le decisioni, non ancora il codice.
+Il progetto è nella fase 0, le fondamenta: per ora c'è lo scheletro dell'app, non ancora le schermate.
 - Struttura, schermate e contratto con il backend: [docs/frontend.md](docs/frontend.md)
 - Decisioni e motivi: [docs/adr/](docs/adr/)
 
 ## Avvio in locale
-**[da completare con la fase 0]** I comandi previsti:
+Serve Node 24 (la versione è in `.nvmrc`).
 
 ```bash
 npm install
 npm run dev
 ```
 
-Senza backend, l'app usa le risposte finte (MSW) costruite sul contratto API.
+Gli altri comandi:
+
+| Comando | Cosa fa |
+|---|---|
+| `npm run lint` | ESLint, con le regole che usano i tipi |
+| `npm run format` | Formatta il codice con Prettier (`format:check` controlla soltanto) |
+| `npm run typecheck` | Controllo dei tipi TypeScript |
+| `npm test` | Test con Vitest (`test:watch` li rilancia a ogni modifica) |
+| `npm run build` | Build di produzione in `dist/` |
+
+Gli stessi controlli girano su GitHub a ogni pull request. Il titolo della PR deve seguire i Conventional Commits (es. `feat(clienti): elenco con filtri`), perché diventa il commit su `main`.
+
+Quando arriveranno le risposte finte (MSW), l'app funzionerà anche senza backend.
 
 ## Variabili d'ambiente
-Per ora nessuna. Quando ci saranno, l'elenco sarà in `.env.example`.
+Per ora nessuna. L'elenco è in `.env.example`.
 
 Tutto ciò che il frontend legge da `import.meta.env` finisce nel browser ed è pubblico: mai segreti.
 

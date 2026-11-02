@@ -1,0 +1,5 @@
+package-lock.json
+dist
+coverage
+# Docs are hand-written prose and tables: leave their layout alone
+*.md

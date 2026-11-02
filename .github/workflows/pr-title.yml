@@ -1,0 +1,25 @@
+name: PR title
+
+# PRs are squash-merged, so the title becomes the commit message on main.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  conventional-commit:
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check the title format
+        env:
+          # Passed through env, never interpolated into the script: the title is user input
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|chore|refactor|docs|test|perf|build|ci)(\([^)]+\))?!?: .{6,}$'
+          if ! printf '%s' "$TITLE" | grep -Eq "$pattern"; then
+            echo "::error::The PR title must follow Conventional Commits, e.g. 'feat(clienti): elenco con filtri'"
+            exit 1
+          fi
