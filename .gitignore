@@ -1,0 +1,36 @@
+# Dipendenze e build
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Ambiente: solo .env.example va versionato
+.env
+.env.*
+!.env.example
+
+# Chiavi e certificati
+*.pem
+*.p12
+*.key
+*.keystore
+
+# Sistema ed editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Log
+*.log
+npm-debug.log*
+
+# Repository privato annidato: non va mai pubblicato da qui
+interno/
+
+# Prompt e standard del team, installati in locale
+.claude/commands/
+.claude/standards/
+.claude/settings.local.json
