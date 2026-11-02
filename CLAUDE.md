@@ -41,6 +41,8 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
   - 401 riporta al login;
   - 403 mostra un messaggio senza cambiare pagina;
   - 404 apre la pagina "non trovato o non accessibile".
+- Dipendenze a versione esatta (`.npmrc`) e uscite da almeno 7 giorni, come fa Dependabot. Per aggiungerne una: `npm install <pacchetto>@<versione>`, scegliendo una versione con almeno 7 giorni. Per rigenerare il lockfile: `npm install --before=<data di 7 giorni fa>`.
+- Componenti shadcn/ui: `npx shadcn add <nome>`, che usa la versione della CLI fissata nel progetto. Si aggiungono solo quando servono, e dopo si lancia `npm run format`.
 - `main` è protetto: si lavora solo con branch corti e pull request, con merge "squash". Il titolo della PR segue i Conventional Commits (`feat:`, `fix:`, `docs:`…) e lo controlla la CI.
 
 ## Trappole
