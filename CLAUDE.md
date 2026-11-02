@@ -42,6 +42,7 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
   - 401 riporta al login;
   - 403 mostra un messaggio senza cambiare pagina;
   - 404 apre la pagina "non trovato o non accessibile".
+  - Le chiamate passano da `api` (`src/api/client.ts`), che aggiunge il token CSRF e gestisce il 401. `unwrap` trasforma le risposte non 2xx in `ApiError`, e `fieldErrors` estrae i messaggi del 422 per ogni campo (`src/api/errors.ts`).
 - Dipendenze a versione esatta (`.npmrc`) e uscite da almeno 7 giorni, come fa Dependabot. Per aggiungerne una: `npm install <pacchetto>@<versione>`, scegliendo una versione con almeno 7 giorni. Per rigenerare il lockfile: `npm install --before=<data di 7 giorni fa>`.
 - Il contratto si cambia prima in `api/openapi.yaml`, poi si lancia `npm run api:types` e si committano entrambi. La CI fallisce se i tipi non sono aggiornati.
 - Componenti shadcn/ui: `npx shadcn add <nome>`, che usa la versione della CLI fissata nel progetto. Si aggiungono solo quando servono, e dopo si lancia `npm run format`.
