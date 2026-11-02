@@ -27,6 +27,18 @@ export default defineConfig([
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      // React Router stops a loader or middleware by throwing redirect() and data()
+      '@typescript-eslint/only-throw-error': [
+        'error',
+        {
+          allow: [
+            { from: 'lib', name: 'Response' },
+            { from: 'package', package: 'react-router', name: 'DataWithResponseInit' },
+          ],
+        },
+      ],
+    },
   },
   {
     // shadcn/ui components export their variants (e.g. buttonVariants) next to the component
