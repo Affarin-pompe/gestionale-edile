@@ -21,6 +21,8 @@ Frontend e backend lavorano in parallelo ([ADR-0002](0002-frontend-separato-via-
 
 Insieme alla sessione si propongono queste regole del contratto:
 - **Un file OpenAPI** è l'unica fonte. Si scrive prima delle schermate, modulo per modulo. Il backend lo implementa; il frontend ne genera tipi e risposte finte.
+- **Protezione CSRF:** con `GET /api/auth/csrf` il backend imposta un cookie `XSRF-TOKEN` leggibile dalla pagina. Il frontend lo ricopia nell'header `X-XSRF-TOKEN` di ogni richiesta che modifica dati. Il backend verifica il token contro la sessione: non basta che header e cookie coincidano, perché un cookie si può falsificare da un sottodominio. Il cookie di sessione resta HttpOnly. È lo schema "double submit" che molti framework backend offrono già: i nomi di cookie e header si adattano a quello scelto.
+- **Accesso:** dopo l'accesso la sessione si rigenera. Con credenziali sbagliate la risposta è `422` con un messaggio generico, senza rivelare se l'email esiste. Con troppi tentativi è `429` con `Retry-After`.
 - **Azienda nel percorso:** `/api/companies/{company}/...`. Il backend verifica a ogni richiesta che l'utente appartenga a quell'azienda.
 - **`GET /api/me`:** utente, aziende e, per ognuna, ruolo e permessi.
 - **Elenchi:** `page`, `per_page`, `sort`, `filter[...]`, `search`. La risposta è `{ data, meta: { total, page, per_page } }`.
@@ -32,7 +34,7 @@ Insieme alla sessione si propongono queste regole del contratto:
 - **Importi e quantità come stringhe**, date in ISO 8601.
 - **File:** caricamento tramite indirizzo firmato a scadenza breve. Il frontend invia poi l'id ottenuto.
 
-**[da concordare]** In quale repository vive il file OpenAPI.
+**Dove vive il file [da concordare]:** per ora è `api/openapi.yaml` in questo repository, con il primo pezzo (accesso, `/api/me`, Clienti). Spostarlo costa poco.
 
 ## Conseguenze accettate
 - La pubblicazione è vincolata: frontend e API devono stare sullo stesso sito.
