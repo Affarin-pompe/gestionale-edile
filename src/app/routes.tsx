@@ -3,10 +3,11 @@ import { data, redirect, type RouteObject } from 'react-router'
 import { LoginPage } from '@/auth/LoginPage'
 import { NoCompanyPage } from '@/auth/NoCompanyPage'
 import { homeLoader, loginAction, logoutAction, requireAuth, requireCompany } from '@/auth/session'
+import { AppLayout } from '@/layouts/AppLayout'
 import { AuthLayout } from '@/layouts/AuthLayout'
 import { HomePage } from './HomePage'
 import { LoadingScreen } from './LoadingScreen'
-import { RouteError } from './RouteError'
+import { PageError, RouteError } from './RouteError'
 
 export function createRoutes(queryClient: QueryClient): RouteObject[] {
   return [
@@ -30,13 +31,20 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
               // Every other path lands here, so a wrong URL also needs a signed-in user
               path: ':azienda',
               middleware: [requireCompany],
+              Component: AppLayout,
               children: [
-                { index: true, Component: HomePage },
                 {
-                  path: '*',
-                  loader: () => {
-                    throw data(null, { status: 404 })
-                  },
+                  // Errors of a page show inside the layout
+                  ErrorBoundary: PageError,
+                  children: [
+                    { index: true, Component: HomePage },
+                    {
+                      path: '*',
+                      loader: () => {
+                        throw data(null, { status: 404 })
+                      },
+                    },
+                  ],
                 },
               ],
             },

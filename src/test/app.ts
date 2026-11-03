@@ -1,7 +1,8 @@
+import type { QueryClient } from '@tanstack/react-query'
 import { cleanup, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createElement } from 'react'
-import { createMemoryRouter, type DataRouter } from 'react-router'
+import { createMemoryRouter, type DataRouter, type RouteObject } from 'react-router'
 import { afterEach } from 'vitest'
 import { api, setUnauthorizedHandler } from '@/api/client'
 import { App } from '@/app/App'
@@ -10,19 +11,30 @@ import { createRoutes } from '@/app/routes'
 import { expireSession } from '@/auth/session'
 import { MOCK_PASSWORD } from '@/mocks/data'
 import { installBrowserCookies } from './cookies'
+import { DESKTOP_WIDTH, installMatchMedia, setScreenWidth } from './media'
 
 const routers: DataRouter[] = []
 
 /**
  * Call once at the top of a test file that renders the app (in jsdom): cookies work as in a
- * browser, and after each test the app is unmounted and the 401 handler is reset.
+ * browser, the screen is a desktop unless the test calls setScreenWidth (src/test/media.ts), and
+ * after each test the app is unmounted, the 401 handler and the screen width are reset.
  */
 export function setupAppTests() {
   installBrowserCookies()
+  // jsdom has no matchMedia, which the sidebar uses: a desktop screen unless a test picks a phone
+  installMatchMedia()
+  // Nor ResizeObserver, which the tooltips of the menu use to place their arrow: nothing resizes
+  window.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
   afterEach(() => {
     cleanup()
     for (const router of routers.splice(0)) router.dispose()
     setUnauthorizedHandler(() => {})
+    setScreenWidth(DESKTOP_WIDTH)
   })
 }
 
@@ -32,12 +44,24 @@ export function setupAppTests() {
  * without it, a test sees what the routes do on their own.
  */
 export function renderApp(url: string, { expireSessionOn401 = false } = {}) {
+  return renderRoutes(createRoutes, url, { expireSessionOn401 })
+}
+
+/**
+ * Like renderApp, with routes made for the test (e.g. a page that is not in the app yet).
+ * The providers are the app's own.
+ */
+export function renderRoutes(
+  routes: (queryClient: QueryClient) => RouteObject[],
+  url: string,
+  { expireSessionOn401 = false } = {},
+) {
   const queryClient = createQueryClient()
   // Same retries, without the wait between them
   queryClient.setDefaultOptions({
     queries: { ...queryClient.getDefaultOptions().queries, retryDelay: 0 },
   })
-  const router = createMemoryRouter(createRoutes(queryClient), { initialEntries: [url] })
+  const router = createMemoryRouter(routes(queryClient), { initialEntries: [url] })
   routers.push(router)
   if (expireSessionOn401) setUnauthorizedHandler(() => expireSession(router))
   const user = userEvent.setup()

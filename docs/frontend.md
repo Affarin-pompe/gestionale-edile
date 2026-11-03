@@ -161,7 +161,10 @@ Regole:
 
 ## Permessi nell'interfaccia
 
-- `useCan('site.update')` legge i permessi da `/api/me`. `<PermissionGate>` nasconde pulsanti e sezioni; le route protette mostrano la pagina "non trovato o non accessibile".
+- I permessi vengono da `/api/me`, per l'azienda nell'URL.
+- `useCan('clients.create')` dice se il ruolo lo permette. `<PermissionGate permission="…">` nasconde pulsanti e sezioni.
+- Le voci del menu con un permesso compaiono solo a chi ce l'ha.
+- Una route che richiede un permesso usa `loader: requirePermission('…')`: senza permesso, l'utente vede la pagina "non trovato o non accessibile" dentro il layout. È un loader e non un middleware perché, alla prima apertura della pagina, l'errore di un middleware sostituirebbe tutto il layout.
 - L'interfaccia **nasconde**, ma è il backend che **blocca**: ogni controllo va ripetuto lato server.
 
 ## Formati

@@ -69,7 +69,6 @@ describe('signed in', () => {
 
   it.each([
     ['a company the user does not belong to', '/costruzioni-verdi'],
-    ['an unknown page inside the company', '/impresa-rossi/non-esiste'],
     ['a path that is not a company', '/xyz'],
   ])('%s shows the not-found page, at the same URL', async (_, url) => {
     await signIn(UFFICIO)
@@ -81,6 +80,19 @@ describe('signed in', () => {
     )
     expect(screen.queryByText(/Luca Bianchi/)).toBeNull()
     expect(router.state.location.pathname).toBe(url)
+  })
+
+  it('an unknown page inside the company shows the not-found page, at the same URL', async () => {
+    await signIn(UFFICIO)
+    const { router } = renderApp('/impresa-rossi/non-esiste')
+    await findHeading(messages['error.notFound.title'])
+    expect(screen.getByText(messages['error.notFound.text'])).toBeTruthy()
+    // Inside a valid company, home is its dashboard
+    expect(screen.getByRole('link', { name: messages['error.home'] }).getAttribute('href')).toBe(
+      '/impresa-rossi',
+    )
+    expect(screen.queryByRole('heading', { name: 'Ciao, Luca Bianchi' })).toBeNull()
+    expect(router.state.location.pathname).toBe('/impresa-rossi/non-esiste')
   })
 
   it('the company page shows the user and their role in that company', async () => {

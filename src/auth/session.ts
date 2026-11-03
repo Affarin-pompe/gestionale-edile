@@ -11,6 +11,7 @@ import {
 import { api } from '@/api/client'
 import { ApiError, fieldErrors, unwrap } from '@/api/errors'
 import { meContext, meQuery } from './me'
+import type { Permission } from './permissions'
 
 export const LOGIN_PATH = '/accedi'
 // The page to go back to after signing in
@@ -49,6 +50,19 @@ export const requireCompany: MiddlewareFunction = ({ params, context }) => {
   const isMember = context.get(meContext).companies.some((c) => c.slug === params.azienda)
   // The same answer the backend gives for another company's data
   if (!isMember) throw data(null, { status: 404 })
+}
+
+/**
+ * Loader for a page that needs a permission: without it, the page does not exist for the user.
+ * A loader and not a middleware: on the first page load, a middleware's error replaces the whole
+ * app layout, while a loader's error shows inside it.
+ */
+export function requirePermission(permission: Permission) {
+  return ({ params, context }: LoaderFunctionArgs) => {
+    const company = context.get(meContext).companies.find((c) => c.slug === params.azienda)
+    if (!company?.permissions.includes(permission)) throw data(null, { status: 404 })
+    return null
+  }
 }
 
 /** From the home page to the user's first company, if there is one. */

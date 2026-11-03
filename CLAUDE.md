@@ -47,7 +47,8 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
 - Dipendenze a versione esatta (`.npmrc`) e uscite da almeno 7 giorni, come fa Dependabot. Per aggiungerne una: `npm install <pacchetto>@<versione>`, scegliendo una versione con almeno 7 giorni. Per rigenerare il lockfile: `npm install --before=<data di 7 giorni fa>`.
 - Il contratto si cambia prima in `api/openapi.yaml`, poi si lancia `npm run api:types` e si committano entrambi. La CI fallisce se i tipi non sono aggiornati.
 - Ogni operazione nuova del contratto ha la sua risposta finta in `src/mocks/handlers.ts`, con gli stessi controlli del backend: sessione, CSRF, azienda e permessi. I test girano contro MSW e usano `createTestApi` (`src/test/api.ts`), che gestisce i cookie come un browser. I test delle pagine girano in jsdom (`// @vitest-environment jsdom`) con `setupAppTests` e `renderApp` (`src/test/app.ts`), che montano l'app intera su un router in memoria.
-- Componenti shadcn/ui: `npx shadcn add <nome>`, che usa la versione della CLI fissata nel progetto. Si aggiungono solo quando servono, e dopo si lancia `npm run format`.
+- Componenti shadcn/ui: `npx shadcn add <nome>`, che usa la versione della CLI fissata nel progetto. Si aggiungono solo quando servono, e dopo si lancia `npm run format`. Se la CLI chiede di sovrascrivere un componente già presente, si risponde di no. Gli eventuali testi in inglese dei componenti copiati si spostano in `src/i18n/it.ts` (id `ui.*`).
+- Le pagine dentro un'azienda sono figlie di `AppLayout` (`src/layouts/`). Il menu laterale è `src/app/menu.ts`: un modulo nuovo è una voce in più, con il permesso che la mostra. Per i permessi si usano `useCan`, `PermissionGate` e, sulle route, `loader: requirePermission('…')`. Va usato come loader, non come middleware, anche se TypeScript accetterebbe entrambi.
 - `main` è protetto: si lavora solo con branch corti e pull request, con merge "squash". Il titolo della PR segue i Conventional Commits (`feat:`, `fix:`, `docs:`…) e lo controlla la CI.
 
 ## Trappole
@@ -57,6 +58,7 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
 - openapi-typescript 7.13 dichiara di supportare solo TypeScript 5. La regola `overrides` in `package.json` gli fa usare il nostro TypeScript 6: va tolta quando esce una versione che lo supporta.
 - MSW non deve mai finire nella build di produzione: si carica solo dentro `import.meta.env.DEV`, e la CI controlla che `dist/` non contenga né MSW né i dati finti.
 - MSW è alla versione 3: `http` si importa da `msw/http`, e l'opzione per le richieste senza risposta si chiama `onUnhandledFrame` (non più `onUnhandledRequest`). In Node i cookie non restano fra una richiesta e l'altra: li gestisce `createTestApi`. Sotto jsdom MSW non scrive nemmeno in `document.cookie`.
+- jsdom non ha `window.matchMedia`, che serve alla barra laterale: `setupAppTests` ne mette una finta. `src/hooks/use-mobile.ts` è riscritto rispetto a quello di shadcn/ui, che non passava il lint di React: non va sovrascritto.
 - React Router 8: `RouterProvider` si importa da `react-router/dom`, tutto il resto da `react-router`. Il pacchetto `react-router-dom` non esiste più.
 - La cartella `interno/` è un altro repository, privato, ignorato da questo. Il suo contenuto non va mai copiato qui.
 

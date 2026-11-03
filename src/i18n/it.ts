@@ -13,6 +13,16 @@ export const messages = {
   'login.failed': 'Accesso non riuscito. Ricarica la pagina e riprova.',
   'logout.submit': 'Esci',
 
+  'menu.dashboard': 'Dashboard',
+  'menu.registry': 'Anagrafiche',
+  'menu.clients': 'Clienti',
+  'layout.companies': 'Le tue aziende',
+
+  'ui.close': 'Chiudi',
+  'ui.sidebar.title': 'Menu',
+  'ui.sidebar.description': 'Le sezioni del gestionale.',
+  'ui.sidebar.toggle': 'Apri o chiudi il menu',
+
   'home.greeting': 'Ciao, {name}',
   'home.membership': '{company}, come {role}',
 
