@@ -1,4 +1,5 @@
-import { useSearchParams } from 'react-router'
+import { useEffect } from 'react'
+import { useLocation, useSearchParams } from 'react-router'
 
 // URL parameter names, in Italian like the paths
 const PAGE = 'pagina'
@@ -10,6 +11,27 @@ const MAX_SEARCH = 100
 /** The rows per page one can choose, and the contract's default. */
 export const PER_PAGE_OPTIONS = [10, 25, 50, 100] as const
 const DEFAULT_PER_PAGE = 25
+
+// The parameters of each list as the user left it, by path. Only in memory: a reload
+// forgets them, and so does the sign-in page, since another user may sign in.
+const leftLists = new Map<string, string>()
+
+function withoutTrailingSlash(path: string) {
+  return path.length > 1 ? path.replace(/\/+$/, '') : path
+}
+
+/**
+ * The way back to a list (breadcrumbs, back links, Cancel): its path with the page, sort,
+ * search and filters it had when the user left it. Other paths stay as they are.
+ */
+export function listHref(path: string) {
+  return path + (leftLists.get(withoutTrailingSlash(path)) ?? '')
+}
+
+/** Forgets every list's parameters: they belong to the user who chose them. */
+export function forgetLists() {
+  leftLists.clear()
+}
 
 export interface ListOptions<TSort extends string, TFilter extends string> {
   /** The API's sort values, as in the contract (e.g. 'name', '-name'); the first is the default. */
@@ -27,6 +49,13 @@ export function useListParams<TSort extends string, TFilter extends string>(
 ) {
   const [params, setParams] = useSearchParams()
   const [defaultSort] = options.sorts
+
+  const { pathname, search: query } = useLocation()
+  useEffect(() => {
+    const path = withoutTrailingSlash(pathname)
+    if (query) leftLists.set(path, query)
+    else leftLists.delete(path)
+  }, [pathname, query])
 
   const pageParam = params.get(PAGE) ?? ''
   const page = /^[1-9]\d{0,5}$/.test(pageParam) ? Number(pageParam) : 1

@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { FormattedMessage } from 'react-intl'
 import { Outlet } from 'react-router'
+import { forgetLists } from '@/hooks/use-list-params'
 
 /** Sign-in pages: outside the session, with nothing cached from the previous one. */
 export function AuthLayout() {
@@ -10,6 +11,7 @@ export function AuthLayout() {
   // browser's back button. Cleared once the pages that read it are gone, or they would fetch again.
   useEffect(() => {
     queryClient.clear()
+    forgetLists()
   }, [queryClient])
 
   return (

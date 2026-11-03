@@ -3,7 +3,7 @@ import { act, screen } from '@testing-library/react'
 import type { DataRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { renderRoutes, setupAppTests } from '@/test/app'
-import { useListParams } from './use-list-params'
+import { forgetLists, listHref, useListParams } from './use-list-params'
 
 setupAppTests()
 
@@ -227,5 +227,55 @@ describe('changing the list', () => {
     const { router } = renderProbe('/elenco?cerca=Rossi')
     await act(() => router.navigate('/elenco?ordine=-created_at&pagina=2'))
     expect(readState()).toEqual({ ...DEFAULTS, page: 2, sort: '-created_at' })
+  })
+})
+
+describe('the way back to a list (listHref)', () => {
+  it('is the path with the parameters the list had when the user left it', () => {
+    renderProbe('/elenco?pagina=2&ordine=-name&cerca=Rossi&tipo=person')
+
+    expect(listHref('/elenco')).toBe('/elenco?pagina=2&ordine=-name&cerca=Rossi&tipo=person')
+  })
+
+  it('follows the URL while the list changes, and is the plain path once the parameters are gone', async () => {
+    const { router, user } = renderProbe('/elenco?tipo=person')
+
+    await user.click(screen.getByRole('button', { name: 'page 3' }))
+    expect(listHref('/elenco')).toBe('/elenco?tipo=person&pagina=3')
+
+    await user.click(screen.getByRole('button', { name: 'tipo none' }))
+    expect(urlParams(router)).toEqual({})
+    expect(listHref('/elenco')).toBe('/elenco')
+  })
+
+  it('also follows a URL opened from elsewhere', async () => {
+    const { router } = renderProbe('/elenco?cerca=Rossi')
+
+    await act(() => router.navigate('/elenco?ordine=-created_at'))
+
+    expect(listHref('/elenco')).toBe('/elenco?ordine=-created_at')
+  })
+
+  it('a path with a trailing slash is the same list', () => {
+    renderProbe('/elenco/?pagina=2')
+
+    expect(listHref('/elenco')).toBe('/elenco?pagina=2')
+    expect(listHref('/elenco/')).toBe('/elenco/?pagina=2')
+  })
+
+  it('a path with nothing remembered stays as it is', () => {
+    renderProbe('/elenco?pagina=2')
+
+    expect(listHref('/altro')).toBe('/altro')
+    expect(listHref('/elenco/123')).toBe('/elenco/123')
+    expect(listHref('/')).toBe('/')
+  })
+
+  it('forgetLists forgets every list', () => {
+    renderProbe('/elenco?pagina=2')
+
+    forgetLists()
+
+    expect(listHref('/elenco')).toBe('/elenco')
   })
 })

@@ -10,6 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
+import { listHref } from '@/hooks/use-list-params'
 
 /** Where the page is: a step for each route of the URL that has a crumb in its handle. */
 export function Breadcrumbs({ className }: { className?: string }) {
@@ -18,7 +19,8 @@ export function Breadcrumbs({ className }: { className?: string }) {
     if (!crumb) return []
     const Crumb = crumb
     const label = typeof Crumb === 'string' ? <FormattedMessage id={Crumb} /> : <Crumb />
-    return [{ id: match.id, to: match.pathname, label }]
+    // A list reopens as the user left it
+    return [{ id: match.id, to: listHref(match.pathname), label }]
   })
 
   return (
