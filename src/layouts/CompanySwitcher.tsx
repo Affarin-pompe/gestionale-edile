@@ -2,6 +2,7 @@ import { Building2, Check, ChevronsUpDown } from 'lucide-react'
 import { FormattedMessage } from 'react-intl'
 import { Link } from 'react-router'
 import { useCompany, useMe } from '@/auth/me'
+import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,68 +10,45 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import {
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  useSidebar,
-} from '@/components/ui/sidebar'
 
-/** The company in the URL; with more than one, a menu to open another. */
+/** The company in the URL, in the header; with more than one, a menu to open another. */
 export function CompanySwitcher() {
   const { companies } = useMe()
   const company = useCompany()
-  const { isMobile, setOpenMobile } = useSidebar()
 
   const current = (
     <>
-      <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-        <Building2 className="size-4" />
-      </div>
-      <div className="grid flex-1 text-left text-sm leading-tight">
-        <span className="truncate font-medium">{company.name}</span>
-        <span className="truncate text-xs">{company.role}</span>
-      </div>
+      <Building2 className="text-muted-foreground" aria-hidden="true" />
+      <span className="max-w-32 truncate sm:max-w-56">{company.name}</span>
     </>
   )
 
+  if (companies.length < 2) {
+    return <p className="flex min-w-0 items-center gap-2 text-2sm font-medium">{current}</p>
+  }
+
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        {companies.length < 2 ? (
-          <div className="flex items-center gap-2 p-2">{current}</div>
-        ) : (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
-                {current}
-                <ChevronsUpDown className="ml-auto" />
-              </SidebarMenuButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              className="min-w-56"
-              align="start"
-              side={isMobile ? 'bottom' : 'right'}
-            >
-              <DropdownMenuLabel>
-                <FormattedMessage id="layout.companies" />
-              </DropdownMenuLabel>
-              {companies.map((c) => (
-                // Links, so another company can open in a new tab
-                <DropdownMenuItem key={c.slug} asChild onSelect={() => setOpenMobile(false)}>
-                  <Link
-                    to={`/${c.slug}`}
-                    aria-current={c.slug === company.slug ? 'true' : undefined}
-                  >
-                    {c.name}
-                    {c.slug === company.slug && <Check className="ml-auto" />}
-                  </Link>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </SidebarMenuItem>
-    </SidebarMenu>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className="min-w-0">
+          {current}
+          <ChevronsUpDown className="text-muted-foreground" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="min-w-56" align="end">
+        <DropdownMenuLabel>
+          <FormattedMessage id="layout.companies" />
+        </DropdownMenuLabel>
+        {companies.map((c) => (
+          // Links, so another company can open in a new tab
+          <DropdownMenuItem key={c.slug} asChild>
+            <Link to={`/${c.slug}`} aria-current={c.slug === company.slug ? 'true' : undefined}>
+              {c.name}
+              {c.slug === company.slug && <Check className="ml-auto" />}
+            </Link>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

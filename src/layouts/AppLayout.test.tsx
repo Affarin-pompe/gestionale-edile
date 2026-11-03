@@ -3,7 +3,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it } from 'vitest'
 import type { Me } from '@/auth/me'
-import { messages } from '@/i18n/it'
+import { messages, type MessageId } from '@/i18n/it'
 import { server } from '@/mocks/node'
 import {
   linkOutsideBreadcrumbs,
@@ -20,18 +20,67 @@ const TITOLARE = 'titolare@example.test'
 const UFFICIO = 'ufficio@example.test'
 const CAPOCANTIERE = 'capocantiere@example.test'
 
-const DASHBOARD = messages['menu.dashboard']
-const REGISTRY = messages['menu.registry']
-const CLIENTS = messages['menu.clients']
-const TOGGLE = messages['ui.sidebar.toggle']
+const T = messages
+const DASHBOARD = T['menu.dashboard']
+const REGISTRY = T['menu.registry']
+const CLIENTS = T['menu.clients']
+const TOGGLE = T['ui.sidebar.toggle']
+const APP_NAME = T['app.name']
 
 const findHeading = (name: string) => screen.findByRole('heading', { name })
 // Outside the breadcrumbs of the header, which have steps with the same names
 const menuLink = (name: string) => linkOutsideBreadcrumbs(name)
 const queryMenuLink = (name: string) => linksOutsideBreadcrumbs(name)[0] ?? null
-/** The button at the top of the menu, which shows the company in the URL. */
+/** The button in the header that shows the company in the URL, when there are more. */
 const switcherButton = (company: string) =>
   screen.getByRole('button', { name: new RegExp(`^${company.replaceAll('.', '\\.')}`) })
+const header = () => screen.getByRole('banner')
+const avatar = (name: string) => screen.getByRole('button', { name: `Menu di ${name}` })
+const logoLink = () => screen.getByRole('link', { name: APP_NAME })
+/** The logo's name: hidden but still read while only the mark shows. */
+const logoName = () => within(logoLink()).getByText(APP_NAME)
+/** The toggle on the edge of the menu, on a computer: the rail has the same name. */
+function edgeToggle() {
+  const toggles = screen
+    .getAllByRole('button', { name: TOGGLE })
+    .filter((b) => b.hasAttribute('aria-expanded'))
+  if (toggles.length !== 1) throw new Error(`Expected one edge toggle, found ${toggles.length}`)
+  return toggles[0] as HTMLElement
+}
+const sidebarState = () =>
+  document.querySelector('[data-slot="sidebar"][data-state]')?.getAttribute('data-state')
+const queryBreadcrumbs = () => screen.queryByRole('navigation', { name: T['ui.breadcrumb'] })
+
+/** Opens the avatar's menu and returns it. */
+async function openUserMenu(user: ReturnType<typeof renderApp>['user'], name: string) {
+  await user.click(avatar(name))
+  return screen.findByRole('menu')
+}
+
+/** The side menu as it reads: each group's label (none for the first) and its items. */
+function menuGroups(root: ParentNode = document) {
+  return Array.from(root.querySelectorAll('[data-sidebar="group"]'), (group) => [
+    group.querySelector('[data-sidebar="group-label"]')?.textContent ?? null,
+    Array.from(group.querySelectorAll('[data-sidebar="menu-item"]'), (item) => item.textContent),
+  ])
+}
+/** A planned module as the menu shows it: its name and "Presto". */
+const soon = (id: MessageId) => `${T[id]}${T['menu.soon']}`
+const PLANNED_REGISTRY = [soon('menu.suppliers'), soon('menu.employees'), soon('menu.vehicles')]
+const menuWith = (registry: (string | null)[]) => [
+  [null, [DASHBOARD]],
+  [
+    T['menu.work'],
+    [soon('menu.quotes'), soon('menu.estimates'), soon('menu.sites'), soon('menu.reports')],
+  ],
+  [T['menu.admin'], [soon('menu.deadlines'), soon('menu.costs')]],
+  [REGISTRY, registry],
+]
+/** The menu items that say "Presto". */
+const plannedItems = () =>
+  Array.from(document.querySelectorAll('[data-sidebar="menu-item"]')).filter((item) =>
+    item.textContent.endsWith(T['menu.soon']),
+  )
 
 /** A user whose only membership can do something with clients, but not see them. */
 const withoutClientsView: Me = {
@@ -49,39 +98,92 @@ const withoutClientsView: Me = {
 }
 
 describe('the layout inside a company', () => {
-  it('shows the company and the role in it, the user, and the menu toggle', async () => {
+  it('the header has the toggle, the breadcrumbs, the company and the avatar; main has only the page', async () => {
     await signIn(TITOLARE)
-    renderApp('/impresa-rossi')
-    await findHeading('Ciao, Giulia Rossi')
+    renderApp('/impresa-rossi/anagrafiche/clienti')
+    await findHeading(T['clients.title'])
 
-    const switcher = switcherButton('Impresa Rossi S.r.l.')
-    expect(within(switcher).getByText('Titolare')).toBeTruthy()
-    const userMenu = screen.getByRole('button', { name: /Giulia Rossi/ })
-    expect(within(userMenu).getByText('Giulia Rossi')).toBeTruthy()
-    expect(within(userMenu).getByText(TITOLARE)).toBeTruthy()
-    // The button in the header and the rail on the edge of the menu
-    expect(screen.getAllByRole('button', { name: TOGGLE })).toHaveLength(2)
+    const main = screen.getByRole('main')
+    expect(main.contains(header())).toBe(false)
+    expect(header().contains(main)).toBe(false)
+    expect(within(header()).getAllByRole('button', { name: TOGGLE })).toHaveLength(1)
+    expect(header().contains(queryBreadcrumbs())).toBe(true)
+    expect(header().contains(switcherButton('Impresa Rossi S.r.l.'))).toBe(true)
+    expect(header().contains(avatar('Giulia Rossi'))).toBe(true)
+    expect(within(main).getByRole('heading', { name: T['clients.title'], level: 1 })).toBeTruthy()
+    expect(within(main).queryByRole('button', { name: TOGGLE })).toBeNull()
+    expect(within(main).queryByRole('navigation', { name: T['ui.breadcrumb'] })).toBeNull()
   })
 
-  it('shows the role the user has in the company in the URL', async () => {
+  it('the avatar has the initials, named after the user; its menu has name, email and role', async () => {
     await signIn(TITOLARE)
-    renderApp('/costruzioni-verdi')
+    const { user } = renderApp('/impresa-rossi')
     await findHeading('Ciao, Giulia Rossi')
 
-    expect(within(switcherButton('Costruzioni Verdi S.p.A.')).getByText('Ufficio')).toBeTruthy()
+    expect(avatar('Giulia Rossi').textContent).toBe('GR')
+    expect(avatar('Giulia Rossi').querySelector('[aria-hidden="true"]')?.textContent).toBe('GR')
+    // The role is in the avatar's menu only
+    expect(screen.queryByText('Titolare')).toBeNull()
+
+    const menu = await openUserMenu(user, 'Giulia Rossi')
+    expect(within(menu).getByText('Giulia Rossi')).toBeTruthy()
+    expect(within(menu).getByText(TITOLARE)).toBeTruthy()
+    expect(within(menu).getByText('Titolare')).toBeTruthy()
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent),
+    ).toEqual([T['logout.submit']])
+  })
+
+  it('the avatar menu shows the role the user has in the company in the URL', async () => {
+    await signIn(TITOLARE)
+    const { user } = renderApp('/costruzioni-verdi')
+    await findHeading('Ciao, Giulia Rossi')
+
+    expect(switcherButton('Costruzioni Verdi S.p.A.')).toBeTruthy()
+    const menu = await openUserMenu(user, 'Giulia Rossi')
+    expect(within(menu).getByText('Ufficio')).toBeTruthy()
     expect(screen.queryByText('Titolare')).toBeNull()
     expect(screen.queryByText('Impresa Rossi S.r.l.')).toBeNull()
+  })
+
+  it('logout from the avatar menu ends on the login page', async () => {
+    await signIn(TITOLARE)
+    const { router, user } = renderApp('/impresa-rossi', { expireSessionOn401: true })
+    await findHeading('Ciao, Giulia Rossi')
+
+    const menu = await openUserMenu(user, 'Giulia Rossi')
+    await user.click(within(menu).getByRole('menuitem', { name: T['logout.submit'] }))
+
+    await findHeading(T['login.title'])
+    expect(router.state.location.pathname).toBe('/accedi')
+  })
+
+  it('the logo links to the dashboard of the company in the URL', async () => {
+    await signIn(TITOLARE)
+    const { router, user } = renderApp('/costruzioni-verdi/anagrafiche/clienti')
+    await findHeading(T['clients.title'])
+
+    expect(screen.getAllByRole('link', { name: APP_NAME })).toHaveLength(1)
+    expect(logoLink().getAttribute('href')).toBe('/costruzioni-verdi')
+    expect(logoName().classList.contains('sr-only')).toBe(false)
+
+    await user.click(logoLink())
+
+    await findHeading('Ciao, Giulia Rossi')
+    expect(router.state.location.pathname).toBe('/costruzioni-verdi')
   })
 
   it('keeps the menu around a page that does not exist, with one main region', async () => {
     await signIn(UFFICIO)
     const { router } = renderApp('/impresa-rossi/non-esiste')
-    await findHeading(messages['error.notFound.title'])
+    await findHeading(T['error.notFound.title'])
 
     expect(menuLink(DASHBOARD)).toBeTruthy()
     expect(menuLink(CLIENTS)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Luca Bianchi/ })).toBeTruthy()
-    expect(screen.getByRole('link', { name: messages['error.home'] }).getAttribute('href')).toBe(
+    expect(avatar('Luca Bianchi')).toBeTruthy()
+    expect(screen.getByRole('link', { name: T['error.home'] }).getAttribute('href')).toBe(
       '/impresa-rossi',
     )
     // The error is part of the page, not a second page inside it
@@ -92,14 +194,13 @@ describe('the layout inside a company', () => {
   it('is not shown around the not-found page of a company the user does not belong to', async () => {
     await signIn(UFFICIO)
     renderApp('/costruzioni-verdi')
-    await findHeading(messages['error.notFound.title'])
+    await findHeading(T['error.notFound.title'])
 
-    expect(screen.getByRole('link', { name: messages['error.home'] }).getAttribute('href')).toBe(
-      '/',
-    )
+    expect(screen.getByRole('link', { name: T['error.home'] }).getAttribute('href')).toBe('/')
     expect(queryMenuLink(DASHBOARD)).toBeNull()
     expect(queryMenuLink(CLIENTS)).toBeNull()
     expect(screen.queryByRole('button', { name: TOGGLE })).toBeNull()
+    expect(screen.queryByRole('link', { name: APP_NAME })).toBeNull()
     expect(screen.queryByText(/Luca Bianchi/)).toBeNull()
   })
 
@@ -119,25 +220,44 @@ describe('the layout inside a company', () => {
 
 describe('side menu', () => {
   it.each([TITOLARE, UFFICIO, CAPOCANTIERE])(
-    '%s sees Dashboard, and Clienti under Anagrafiche',
+    '%s sees Dashboard, Lavori, Amministrazione, and Clienti under Anagrafiche',
     async (email) => {
       await signIn(email)
       renderApp('/impresa-rossi')
       await waitFor(() => menuLink(DASHBOARD))
 
       expect(menuLink(CLIENTS)).toBeTruthy()
-      expect(screen.getByText(REGISTRY)).toBeTruthy()
+      expect(menuGroups()).toEqual(menuWith([CLIENTS, ...PLANNED_REGISTRY]))
     },
   )
 
-  it('without clients.view in the company, has no Clienti and no Anagrafiche', async () => {
+  it('without clients.view in the company, Anagrafiche has only the planned modules, no Clienti', async () => {
     server.use(http.get('*/api/me', () => HttpResponse.json(withoutClientsView)))
     renderApp('/impresa-rossi')
     await findHeading('Ciao, Paola Verdi')
 
     expect(menuLink(DASHBOARD)).toBeTruthy()
     expect(queryMenuLink(CLIENTS)).toBeNull()
-    expect(screen.queryByText(REGISTRY)).toBeNull()
+    expect(menuGroups()).toEqual(menuWith(PLANNED_REGISTRY))
+  })
+
+  it.each([
+    ['titolare', TITOLARE],
+    ['capocantiere', CAPOCANTIERE],
+  ])('for %s the planned modules say "Presto" and are not links', async (_, email) => {
+    await signIn(email)
+    renderApp('/impresa-rossi')
+    await waitFor(() => menuLink(DASHBOARD))
+
+    const planned = plannedItems()
+    expect(planned).toHaveLength(9)
+    for (const item of planned) {
+      expect(within(item as HTMLElement).getByText(T['menu.soon'])).toBeTruthy()
+      expect(item.querySelector('a, button, [href], [tabindex]')).toBeNull()
+    }
+    for (const id of ['menu.quotes', 'menu.sites', 'menu.costs', 'menu.vehicles'] as const) {
+      expect(screen.queryByRole('link', { name: new RegExp(T[id]) })).toBeNull()
+    }
   })
 
   it('links to the pages of the company in the URL', async () => {
@@ -188,8 +308,8 @@ describe('side menu', () => {
     await waitFor(() =>
       expect(router.state.location.pathname).toBe('/impresa-rossi/anagrafiche/clienti'),
     )
-    await findHeading(messages['clients.title'])
-    expect(screen.queryByRole('heading', { name: messages['error.notFound.title'] })).toBeNull()
+    await findHeading(T['clients.title'])
+    expect(screen.queryByRole('heading', { name: T['error.notFound.title'] })).toBeNull()
     expect(isCurrent(menuLink(CLIENTS))).toBe(true)
   })
 })
@@ -203,7 +323,7 @@ describe('company switcher', () => {
     await user.click(switcherButton('Impresa Rossi S.r.l.'))
 
     const menu = await screen.findByRole('menu')
-    expect(within(menu).getByText(messages['layout.companies'])).toBeTruthy()
+    expect(within(menu).getByText(T['layout.companies'])).toBeTruthy()
     const items = within(menu).getAllByRole('menuitem')
     expect(items.map((i) => [i.textContent, i.getAttribute('href')])).toEqual([
       ['Impresa Rossi S.r.l.', '/impresa-rossi'],
@@ -216,7 +336,7 @@ describe('company switcher', () => {
     expect(items[1]?.querySelector('svg.lucide-check')).toBeNull()
   })
 
-  it('following another company opens it, with the role there', async () => {
+  it('following another company opens it; the avatar menu then has the role there', async () => {
     await signIn(TITOLARE)
     const { router, user } = renderApp('/impresa-rossi')
     await findHeading('Ciao, Giulia Rossi')
@@ -225,32 +345,84 @@ describe('company switcher', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Costruzioni Verdi S.p.A.' }))
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/costruzioni-verdi'))
-    const switcher = await waitFor(() => switcherButton('Costruzioni Verdi S.p.A.'))
-    expect(within(switcher).getByText('Ufficio')).toBeTruthy()
-    expect(screen.queryByText('Titolare')).toBeNull()
+    await waitFor(() => switcherButton('Costruzioni Verdi S.p.A.'))
     expect(screen.queryByRole('menu')).toBeNull()
     expect(menuLink(DASHBOARD).getAttribute('href')).toBe('/costruzioni-verdi')
+    const menu = await openUserMenu(user, 'Giulia Rossi')
+    expect(within(menu).getByText('Ufficio')).toBeTruthy()
+    expect(screen.queryByText('Titolare')).toBeNull()
   })
 
-  it('with a single company there is nothing to switch to', async () => {
+  it('with a single company, the header shows its name, with nothing to open', async () => {
     await signIn(UFFICIO)
     renderApp('/impresa-rossi')
     await findHeading('Ciao, Luca Bianchi')
 
-    expect(screen.getByText('Impresa Rossi S.r.l.')).toBeTruthy()
-    expect(screen.getByText('Ufficio')).toBeTruthy()
+    const name = within(header()).getByText('Impresa Rossi S.r.l.')
+    expect(name.closest('p')).not.toBeNull()
+    expect(name.closest('button')).toBeNull()
     expect(screen.queryByRole('button', { name: /Impresa Rossi/ })).toBeNull()
-    expect(screen.queryByText(messages['layout.companies'])).toBeNull()
+    expect(screen.queryByText(T['layout.companies'])).toBeNull()
+    // The role is in the avatar's menu, not next to the company
+    expect(screen.queryByText('Ufficio')).toBeNull()
+  })
+})
+
+describe('on a computer', () => {
+  it('the toggle on the edge collapses the menu to its icons, and the logo to its mark', async () => {
+    await signIn(TITOLARE)
+    const { user } = renderApp('/impresa-rossi')
+    await findHeading('Ciao, Giulia Rossi')
+    // The toggle on the edge and the rail
+    expect(screen.getAllByRole('button', { name: TOGGLE })).toHaveLength(2)
+    expect(edgeToggle().getAttribute('aria-expanded')).toBe('true')
+    expect(sidebarState()).toBe('expanded')
+    expect(logoName().classList.contains('sr-only')).toBe(false)
+
+    await user.click(edgeToggle())
+
+    expect(edgeToggle().getAttribute('aria-expanded')).toBe('false')
+    expect(sidebarState()).toBe('collapsed')
+    // Only the mark shows; the link keeps its name and its target
+    expect(logoName().classList.contains('sr-only')).toBe(true)
+    expect(logoLink().getAttribute('href')).toBe('/impresa-rossi')
+
+    await user.click(edgeToggle())
+
+    expect(edgeToggle().getAttribute('aria-expanded')).toBe('true')
+    expect(sidebarState()).toBe('expanded')
+    expect(logoName().classList.contains('sr-only')).toBe(false)
   })
 })
 
 describe('on a phone', () => {
   const openMenuSheet = async (user: ReturnType<typeof renderApp>['user']) => {
     await user.click(screen.getByRole('button', { name: TOGGLE }))
-    return screen.findByRole('dialog', { name: messages['ui.sidebar.title'] })
+    return screen.findByRole('dialog', { name: T['ui.sidebar.title'] })
   }
 
-  it('the menu stays closed until the toggle opens it', async () => {
+  it('the header has one menu button and the mark, the company and the avatar, no breadcrumbs', async () => {
+    setScreenWidth(PHONE_WIDTH)
+    await signIn(TITOLARE)
+    renderApp('/impresa-rossi/anagrafiche/clienti/impresa-rossi-001')
+    await findHeading('Edil Ferri S.r.l.')
+
+    expect(screen.getAllByRole('button', { name: TOGGLE })).toHaveLength(1)
+    expect(header().contains(screen.getByRole('button', { name: TOGGLE }))).toBe(true)
+    expect(screen.getByRole('button', { name: TOGGLE }).hasAttribute('aria-expanded')).toBe(false)
+    expect(header().contains(logoLink())).toBe(true)
+    expect(logoLink().getAttribute('href')).toBe('/impresa-rossi')
+    expect(logoName().classList.contains('sr-only')).toBe(true)
+    expect(header().contains(switcherButton('Impresa Rossi S.r.l.'))).toBe(true)
+    expect(header().contains(avatar('Giulia Rossi'))).toBe(true)
+    // Not even hidden: the page's back link takes their place
+    expect(queryBreadcrumbs()).toBeNull()
+    expect(
+      within(screen.getByRole('main')).getByRole('link', { name: T['clients.title'] }),
+    ).toBeTruthy()
+  })
+
+  it('the menu stays closed until the button opens it, with the logo and the menu only', async () => {
     setScreenWidth(PHONE_WIDTH)
     await signIn(TITOLARE)
     const { user } = renderApp('/impresa-rossi')
@@ -260,10 +432,16 @@ describe('on a phone', () => {
     expect(queryMenuLink(CLIENTS)).toBeNull()
 
     const sheet = await openMenuSheet(user)
-    expect(within(sheet).getByText(messages['ui.sidebar.description'])).toBeTruthy()
+    expect(within(sheet).getByText(T['ui.sidebar.description'])).toBeTruthy()
     expect(within(sheet).getByRole('link', { name: CLIENTS })).toBeTruthy()
-    expect(within(sheet).getByRole('button', { name: /Giulia Rossi/ })).toBeTruthy()
-    expect(within(sheet).getByRole('button', { name: messages['ui.close'] })).toBeTruthy()
+    // The whole logo, not only the mark
+    const logo = within(sheet).getByRole('link', { name: APP_NAME })
+    expect(within(logo).getByText(APP_NAME).classList.contains('sr-only')).toBe(false)
+    expect(menuGroups(sheet)).toEqual(menuWith([CLIENTS, ...PLANNED_REGISTRY]))
+    // The company and the user are in the header, not in the menu
+    expect(within(sheet).queryByRole('button', { name: /Giulia Rossi/ })).toBeNull()
+    expect(within(sheet).queryByRole('button', { name: /Impresa Rossi/ })).toBeNull()
+    expect(within(sheet).getByRole('button', { name: T['ui.close'] })).toBeTruthy()
     expect(document.body.innerHTML).not.toMatch(/toggle sidebar|mobile sidebar|>Close</i)
   })
 
@@ -283,19 +461,19 @@ describe('on a phone', () => {
     expect(queryMenuLink(CLIENTS)).toBeNull()
   })
 
-  it('switching company closes the menu', async () => {
+  it('switching company from the header opens it, without the menu', async () => {
     setScreenWidth(PHONE_WIDTH)
     await signIn(TITOLARE)
     const { router, user } = renderApp('/impresa-rossi')
     await findHeading('Ciao, Giulia Rossi')
 
-    const sheet = await openMenuSheet(user)
-    await user.click(within(sheet).getByRole('button', { name: /^Impresa Rossi S\.r\.l\./ }))
+    await user.click(switcherButton('Impresa Rossi S.r.l.'))
     await user.click(await screen.findByRole('menuitem', { name: 'Costruzioni Verdi S.p.A.' }))
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/costruzioni-verdi'))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(screen.getByText('Costruzioni Verdi S.p.A., come Ufficio')).toBeTruthy()
+    await waitFor(() => switcherButton('Costruzioni Verdi S.p.A.'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(logoLink().getAttribute('href')).toBe('/costruzioni-verdi')
   })
 
   it('on a wider screen the menu is shown in place, without opening it', async () => {
@@ -309,5 +487,6 @@ describe('on a phone', () => {
 
     expect(menuLink(DASHBOARD)).toBeTruthy()
     expect(screen.queryByRole('dialog')).toBeNull()
+    expect(queryBreadcrumbs()).not.toBeNull()
   })
 })

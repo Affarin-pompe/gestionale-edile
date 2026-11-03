@@ -41,7 +41,7 @@ const kindSelect = () =>
 const saveButton = () => screen.getByRole<HTMLButtonElement>('button', { name: T['form.save'] })
 const main = () => screen.getByRole('main')
 /** The link above the title, back to where the page belongs: the list unless named otherwise. */
-/** The page's back link; the breadcrumbs, also in the page, can have a step with its name. */
+/** The page's back link; a step of the breadcrumbs with its name never counts. */
 const backLink = (name: string = T['clients.title']) => linkOutsideBreadcrumbs(name, main())
 
 /** The error shown in the same field as the input, or null. */
