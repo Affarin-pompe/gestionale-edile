@@ -50,7 +50,7 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 
 | Uso | Layout | Da dove si parte |
 |---|---|---|
-| Tutta l'applicazione | **AppLayout**: barra laterale a sinistra con azienda attiva e utente (si riduce a icone, su telefono diventa un menu a scomparsa) + intestazione con le briciole di pane. Adatto a molti moduli | Blocco Sidebar di shadcn/ui |
+| Tutta l'applicazione | **AppLayout**, con la cornice di Metronic: menu laterale con il logo in alto (si riduce a icone con il pulsante sul suo bordo, su telefono diventa un menu a scomparsa) + intestazione con le briciole di pane a sinistra, l'azienda attiva e l'avatar dell'utente a destra. Adatto a molti moduli | Blocco Sidebar di shadcn/ui |
 | Accesso, password dimenticata, inviti | **AuthLayout**: con logo e colori dell'azienda | Blocco Login di shadcn/ui |
 | Pagine di errore (404, 500) | **ErrorLayout** | Da costruire: una pagina semplice |
 
@@ -83,11 +83,13 @@ L'azienda è sempre nell'URL, così un utente che lavora per più aziende può a
 /:azienda/rapportini/oggi                                versione per telefono
 /:azienda/rapportini/:id
 
-/:azienda/scadenze                                       elenco + calendario
+/:azienda/preventivi                                     richiesto: viene prima
+/:azienda/computi                                        computi metrici estimativi; richiesto: viene prima
+/:azienda/scadenziario                                   elenco + calendario; richiesto: viene prima
 /:azienda/costi
 
 /:azienda/anagrafiche/clienti          /:id
-/:azienda/anagrafiche/fornitori        /:id              include i subappaltatori
+/:azienda/anagrafiche/fornitori        /:id              include i subappaltatori; richiesto: viene prima
 /:azienda/anagrafiche/dipendenti       /:id
 /:azienda/anagrafiche/mezzi            /:id
 
@@ -95,21 +97,21 @@ L'azienda è sempre nell'URL, così un utente che lavora per più aziende può a
 /:azienda/impostazioni/utenti                            inviti, ruolo per utente
 /:azienda/impostazioni/ruoli                             permessi per ruolo
 
-(fase 2)  /:azienda/preventivi  /:azienda/prezzari
+(fase 2)  /:azienda/prezzari
 (fase 3)  /:azienda/acquisti  /:azienda/magazzino  /:azienda/fatture
 ```
 
 ### Menu laterale
 ```
 Dashboard
-Cantieri
-Rapportini
-Scadenze
-Costi
-Anagrafiche ▸ Clienti · Fornitori e subappaltatori · Dipendenti · Mezzi
-Impostazioni                (solo titolare)
+Lavori          Preventivi · Computi metrici · Cantieri · Rapportini
+Amministrazione Scadenziario · Costi
+Anagrafiche     Clienti · Fornitori · Dipendenti · Mezzi
+Impostazioni    (solo titolare, quando ci sarà il permesso nel contratto)
 ```
-Le voci compaiono solo se l'utente ha il permesso. Il menu è un unico elenco in `src/app/menu.ts` (voce, icona, percorso, permesso richiesto): un modulo nuovo è una riga in più.
+In ogni sezione vengono prima i moduli richiesti: preventivi, computo metrico, scadenziario, clienti e fornitori. Le voci compaiono solo se l'utente ha il permesso. Il menu è un unico elenco in `src/app/menu.ts` (voce, icona, percorso, permesso richiesto): un modulo nuovo è una riga in più.
+
+Come in Metronic ("Soon"), i moduli previsti ma non ancora pronti sono nel menu con l'etichetta "Presto" e senza link (`soon: true`). Li vedono tutti, perché non hanno ancora un permesso; quando il modulo è pronto, il permesso prende il posto di `soon`.
 
 ## Cinque schermate tipo
 
@@ -246,3 +248,5 @@ Regole:
 | **1, base operativa** | Anagrafiche, cantieri, rapportini (con la versione per telefono), documenti e scadenze, costi, dashboard, impostazioni (azienda, utenti, ruoli) |
 | **2, parte tecnica** | Preventivi e computo (tabella ad albero modificabile, sempre con TanStack Table), cronoprogramma Gantt, SAL |
 | **3, amministrazione** | Acquisti, magazzino, fatture |
+
+**Priorità richieste** (novembre 2026): preventivi, computo metrico, scadenziario, clienti e fornitori. Vengono prima delle altre voci della fase 1, anche se preventivi e computo erano nella fase 2.

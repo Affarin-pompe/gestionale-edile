@@ -31,7 +31,7 @@ const T = messages
 
 const findHeading = (name: string) => screen.findByRole('heading', { name, level: 1 })
 const main = () => screen.getByRole('main')
-/** The page's link with this name; the breadcrumbs, also in the page, do not count. */
+/** The page's link with this name; steps of the breadcrumbs never count. */
 const queryLink = (name: string) => {
   const links = linksOutsideBreadcrumbs(name, main())
   if (links.length > 1) throw new Error(`More than one link "${name}" in the page`)
