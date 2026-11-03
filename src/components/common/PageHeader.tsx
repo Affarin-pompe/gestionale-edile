@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
+import { listHref } from '@/hooks/use-list-params'
 
 /**
  * The title of a page, with its main actions on the right and, above it, an optional
@@ -13,7 +14,10 @@ export function PageHeader({
 }: {
   /** A text from src/i18n (FormattedMessage) or data, like a client's name. */
   title: ReactNode
-  /** Where the page belongs, named: a text from src/i18n or data, like a client's name. */
+  /**
+   * Where the page belongs, named: a text from src/i18n or data, like a client's name.
+   * A list reopens as the user left it.
+   */
   back?: { to: string; label: ReactNode }
   actions?: ReactNode
 }) {
@@ -21,7 +25,7 @@ export function PageHeader({
     <div className="flex flex-col gap-1">
       {back && (
         <Link
-          to={back.to}
+          to={listHref(back.to)}
           className="flex w-fit items-center gap-1 text-2sm text-muted-foreground hover:text-foreground md:hidden"
         >
           <ArrowLeft className="size-4" aria-hidden="true" />

@@ -25,6 +25,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
+import { listHref } from '@/hooks/use-list-params'
 import { isMessageId, type MessageId } from '@/i18n/it'
 
 /**
@@ -40,6 +41,7 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
   form: UseFormReturn<TValues, unknown, TOutput>
   /** Saves; a thrown ApiError is shown on the form. */
   onSubmit: (values: TOutput) => Promise<void>
+  /** Where Cancel goes; a list reopens as the user left it. */
   cancelTo: string
   children: ReactNode
 }) {
@@ -93,7 +95,7 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
         )}
         <div className="flex flex-wrap justify-end gap-2.5">
           <Button asChild variant="outline">
-            <Link to={cancelTo}>
+            <Link to={listHref(cancelTo)}>
               <FormattedMessage id="form.cancel" />
             </Link>
           </Button>

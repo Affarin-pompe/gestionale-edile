@@ -10,6 +10,7 @@ import { App } from '@/app/App'
 import { createQueryClient } from '@/app/query-client'
 import { createRoutes } from '@/app/routes'
 import { expireSession } from '@/auth/session'
+import { forgetLists } from '@/hooks/use-list-params'
 import { messages } from '@/i18n/it'
 import { MOCK_PASSWORD } from '@/mocks/data'
 import { installBrowserCookies } from './cookies'
@@ -20,8 +21,8 @@ const routers: DataRouter[] = []
 /**
  * Call once at the top of a test file that renders the app (in jsdom): cookies work as in a
  * browser, the screen is a desktop unless the test calls setScreenWidth (src/test/media.ts), and
- * after each test the app is unmounted, the 401 handler and the screen width are reset, and the
- * notices are dismissed.
+ * after each test the app is unmounted, the 401 handler and the screen width are reset, the
+ * notices are dismissed and the lists' remembered parameters are forgotten.
  */
 export function setupAppTests() {
   installBrowserCookies()
@@ -40,6 +41,8 @@ export function setupAppTests() {
     setScreenWidth(DESKTOP_WIDTH)
     // Sonner keeps its notices in the module: a new Toaster would show the previous test's again
     toast.dismiss()
+    // The way back to each list is kept in the module, like the notices
+    forgetLists()
   })
 }
 
