@@ -181,8 +181,8 @@ describe('side menu', () => {
     await waitFor(() =>
       expect(router.state.location.pathname).toBe('/impresa-rossi/anagrafiche/clienti'),
     )
-    // The Clienti page comes with the next pull request: for now, the not-found page
-    await findHeading(messages['error.notFound.title'])
+    await findHeading(messages['clients.title'])
+    expect(screen.queryByRole('heading', { name: messages['error.notFound.title'] })).toBeNull()
     expect(isCurrent(menuLink(CLIENTS))).toBe(true)
   })
 })

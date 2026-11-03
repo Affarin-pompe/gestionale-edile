@@ -23,6 +23,27 @@ export const messages = {
   'ui.sidebar.description': 'Le sezioni del gestionale.',
   'ui.sidebar.toggle': 'Apri o chiudi il menu',
 
+  'list.results': '{total, plural, one {# risultato} other {# risultati}}',
+  'list.page': 'pagina {page} di {pages}',
+  'list.pagination': "Pagine dell'elenco",
+  'list.previous': 'Precedente',
+  'list.next': 'Successiva',
+  'list.noResults': 'Nessun risultato con questi filtri.',
+  'list.loadFailed': "Non è stato possibile caricare l'elenco.",
+  'list.retry': 'Riprova',
+  'list.all': 'Tutti',
+
+  'clients.title': 'Clienti',
+  'clients.empty': 'Non ci sono ancora clienti.',
+  'clients.search': 'Cerca per nome, P.IVA, C.F. o città',
+  'clients.kind': 'Tipo',
+  'clients.kind.company': 'Impresa',
+  'clients.kind.person': 'Privato',
+  'clients.name': 'Nome',
+  'clients.taxId': 'P.IVA o C.F.',
+  'clients.city': 'Città',
+  'clients.createdAt': 'Aggiunto il',
+
   'home.greeting': 'Ciao, {name}',
   'home.membership': '{company}, come {role}',
 

@@ -28,7 +28,7 @@ npm run build
 Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build devono passare. Sono gli stessi controlli della CI (`.github/workflows/ci.yml`).
 
 ## Architettura in 5 righe
-- `src/features/<modulo>/`: un modulo per area, sempre con `api.ts`, `routes.tsx`, `schemas.ts`, `pages/`, `components/`.
+- `src/features/<modulo>/`: un modulo per area, sempre con `api.ts`, `routes.ts`, `schemas.ts`, `pages/`, `components/`. `routes.ts` contiene solo oggetti di route (`Component: Pagina`, senza JSX): così l'aggiornamento a caldo delle pagine continua a funzionare.
 - `src/components/ui/` contiene i componenti shadcn/ui; `src/components/common/` quelli del gestionale costruiti sopra.
 - `api/openapi.yaml` è il contratto con il backend. `src/api/schema.d.ts` è generato da lì: non si scrive a mano. `src/mocks/` contiene le risposte finte (MSW).
 - L'azienda è sempre nell'URL (`/:azienda/...`) e nel percorso delle API.
@@ -49,6 +49,7 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
 - Ogni operazione nuova del contratto ha la sua risposta finta in `src/mocks/handlers.ts`, con gli stessi controlli del backend: sessione, CSRF, azienda e permessi. I test girano contro MSW e usano `createTestApi` (`src/test/api.ts`), che gestisce i cookie come un browser. I test delle pagine girano in jsdom (`// @vitest-environment jsdom`) con `setupAppTests` e `renderApp` (`src/test/app.ts`), che montano l'app intera su un router in memoria.
 - Componenti shadcn/ui: `npx shadcn add <nome>`, che usa la versione della CLI fissata nel progetto. Si aggiungono solo quando servono, e dopo si lancia `npm run format`. Se la CLI chiede di sovrascrivere un componente già presente, si risponde di no. Gli eventuali testi in inglese dei componenti copiati si spostano in `src/i18n/it.ts` (id `ui.*`).
 - Le pagine dentro un'azienda sono figlie di `AppLayout` (`src/layouts/`). Il menu laterale è `src/app/menu.ts`: un modulo nuovo è una voce in più, con il permesso che la mostra. Per i permessi si usano `useCan`, `PermissionGate` e, sulle route, `loader: requirePermission('…')`. Va usato come loader, non come middleware, anche se TypeScript accetterebbe entrambi.
+- Gli elenchi usano `useListParams` (`src/hooks/`) e `PageHeader`, `FilterBar`, `DataTable` (`src/components/common/`). Pagina, ordinamento, ricerca e filtri stanno nell'URL, in italiano (`pagina`, `ordine`, `cerca`, un parametro per filtro). Ordinamento e paginazione li fa il backend. Una colonna è ordinabile solo se il suo id è un valore di `sort` del contratto; le altre hanno `enableSorting: false`. Esempio completo: `src/features/clients/`.
 - `main` è protetto: si lavora solo con branch corti e pull request, con merge "squash". Il titolo della PR segue i Conventional Commits (`feat:`, `fix:`, `docs:`…) e lo controlla la CI.
 
 ## Trappole
@@ -60,6 +61,7 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
 - MSW è alla versione 3: `http` si importa da `msw/http`, e l'opzione per le richieste senza risposta si chiama `onUnhandledFrame` (non più `onUnhandledRequest`). In Node i cookie non restano fra una richiesta e l'altra: li gestisce `createTestApi`. Sotto jsdom MSW non scrive nemmeno in `document.cookie`.
 - jsdom non ha `window.matchMedia`, che serve alla barra laterale: `setupAppTests` ne mette una finta. `src/hooks/use-mobile.ts` è riscritto rispetto a quello di shadcn/ui, che non passava il lint di React: non va sovrascritto.
 - React Router 8: `RouterProvider` si importa da `react-router/dom`, tutto il resto da `react-router`. Il pacchetto `react-router-dom` non esiste più.
+- TanStack Table è alla 9: `useTable` con le funzioni dichiarate in `tableFeatures` (per gli elenchi, `listFeatures` e `listColumnHelper` in `src/components/common/list-table.ts`). Gli esempi della guida "Data Table" di shadcn/ui usano la 8 (`useReactTable`) e non si copiano così come sono. Colonne e funzioni si dichiarano fuori dai componenti, perché restino stabili fra un render e l'altro.
 - La cartella `interno/` è un altro repository, privato, ignorato da questo. Il suo contenuto non va mai copiato qui.
 
 ## Vincoli non negoziabili
