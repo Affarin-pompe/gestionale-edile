@@ -21,7 +21,7 @@ export function ClientNewPage() {
   }
 
   return (
-    <div className="flex max-w-4xl flex-col gap-4 p-4">
+    <div className="mx-auto flex w-full max-w-155 flex-col gap-5">
       <PageHeader
         back={{ to: paths.list, label: <FormattedMessage id="clients.title" /> }}
         title={<FormattedMessage id="clients.new" />}

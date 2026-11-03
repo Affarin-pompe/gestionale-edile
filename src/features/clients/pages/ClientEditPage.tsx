@@ -25,7 +25,7 @@ export function ClientEditPage() {
   }
 
   return (
-    <div className="flex max-w-4xl flex-col gap-4 p-4">
+    <div className="mx-auto flex w-full max-w-155 flex-col gap-5">
       <PageHeader
         back={{ to: paths.detail(id), label: client.name }}
         title={<FormattedMessage id="clients.editTitle" />}

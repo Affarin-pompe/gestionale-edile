@@ -6,7 +6,13 @@ import type { Me } from '@/auth/me'
 import { messages } from '@/i18n/it'
 import { db } from '@/mocks/db'
 import { server } from '@/mocks/node'
-import { renderApp, setupAppTests, signIn } from '@/test/app'
+import {
+  linkOutsideBreadcrumbs,
+  linksOutsideBreadcrumbs,
+  renderApp,
+  setupAppTests,
+  signIn,
+} from '@/test/app'
 import { countRequests } from '@/test/cookies'
 import { clientFormValues } from '../schemas'
 
@@ -35,7 +41,8 @@ const kindSelect = () =>
 const saveButton = () => screen.getByRole<HTMLButtonElement>('button', { name: T['form.save'] })
 const main = () => screen.getByRole('main')
 /** The link above the title, back to where the page belongs: the list unless named otherwise. */
-const backLink = (name: string = T['clients.title']) => within(main()).getByRole('link', { name })
+/** The page's back link; the breadcrumbs, also in the page, can have a step with its name. */
+const backLink = (name: string = T['clients.title']) => linkOutsideBreadcrumbs(name, main())
 
 /** The error shown in the same field as the input, or null. */
 function errorIn(input: HTMLElement) {
@@ -487,8 +494,8 @@ describe('new client, saving', () => {
   it('the list, loaded before, then includes the new client', async () => {
     await signIn(TITOLARE)
     const { router, user } = renderApp(LIST_URL)
-    await screen.findByText('60 risultati · pagina 1 di 3')
-    await user.click(within(main()).getByRole('link', { name: T['clients.new'] }))
+    await screen.findByText('60 risultati')
+    await user.click(linkOutsideBreadcrumbs(T['clients.new'], main()))
     await findHeading(T['clients.new'])
     // First by name, so it is on page 1
     await user.type(textbox(T['clients.name']), 'Abete Costruzioni S.r.l.')
@@ -498,7 +505,7 @@ describe('new client, saving', () => {
 
     await user.click(backLink())
 
-    await screen.findByText('61 risultati · pagina 1 di 3')
+    await screen.findByText('61 risultati')
     expect(router.state.location.pathname).toBe(LIST_URL)
     const firstRow = screen.getByRole('table').querySelector('tbody tr td')
     expect(firstRow?.textContent).toBe('Abete Costruzioni S.r.l.')
@@ -602,10 +609,10 @@ describe('editing a client', () => {
   it('the list, loaded before, then shows the new values', async () => {
     await signIn(TITOLARE)
     const { router, user } = renderApp(LIST_URL)
-    await screen.findByText('60 risultati · pagina 1 di 3')
+    await screen.findByText('60 risultati')
     await user.click(screen.getByRole('link', { name: FERRI_NAME }))
     await findHeading(FERRI_NAME)
-    await user.click(within(main()).getByRole('link', { name: T['clients.edit'] }))
+    await user.click(linkOutsideBreadcrumbs(T['clients.edit'], main()))
     await findHeading(T['clients.editTitle'])
     await user.clear(textbox(T['clients.name']))
     await user.type(textbox(T['clients.name']), 'Edil Ferri e Figli S.r.l.')
@@ -654,7 +661,7 @@ describe('leaving the form', () => {
     await openEditForm()
 
     expect(backLink(FERRI_NAME).getAttribute('href')).toBe(FERRI_URL)
-    expect(within(main()).queryByRole('link', { name: T['clients.title'] })).toBeNull()
+    expect(linksOutsideBreadcrumbs(T['clients.title'], main())).toEqual([])
   })
 
   it('the back link of the new client form is "Clienti", to the list', async () => {
