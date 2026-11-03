@@ -21,14 +21,14 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 | Routing | **React Router 8**, modalità "data" (senza il framework) | Route annidate: layout, azienda nell'URL, schede del cantiere. I controlli di accesso e di azienda girano prima che la pagina si apra. La 8 è la versione attuale; il piano iniziale diceva 7 |
 | Dati dal server | **TanStack Query** | Cache, stati di caricamento, aggiornamento dopo le modifiche |
 | Tabelle | **TanStack Table 9** | Paginazione, ordinamento e filtri lato server. È anche la base della tabella di shadcn/ui. La 9 ha un'API diversa dalla 8, usata negli esempi di shadcn/ui |
-| Form | **React Hook Form + Zod** | Validazione immediata; gli errori del server finiscono sui campi. Sono gli stessi dei form di shadcn/ui |
+| Form | **React Hook Form + Zod**, collegati da @hookform/resolvers | Validazione immediata; gli errori del server finiscono sui campi. Sono gli stessi dei form di shadcn/ui. @hookform/resolvers è alla 5: la 6 va in conflitto con una dipendenza opzionale già presente |
 | Client API | **openapi-typescript + openapi-fetch** | Tipi generati dal contratto con il backend: se il backend cambia un campo, il frontend non compila finché non si allinea |
 | Sviluppo senza backend | **MSW** (Mock Service Worker) | Risposte finte basate sul contratto, così frontend e backend procedono in parallelo. Le stesse risposte servono ai test. Il plugin per Vite serve il worker solo in sviluppo |
 | Traduzioni | react-intl | Solo italiano per ora, ma nessun testo scritto direttamente nei componenti |
 | Date | date-fns con locale `it` | Calcoli sulle scadenze (giorni mancanti, rinnovi), che `Intl` non fa |
 | Calcoli in anteprima | big.js | Solo per le anteprime nei form; i totali ufficiali arrivano dal backend |
 | Grafici | Recharts, tramite i componenti Chart di shadcn/ui | Dashboard: costi, avanzamento dei cantieri |
-| Icone e avvisi | lucide-react, sonner | Quelli previsti da shadcn/ui |
+| Icone e avvisi | lucide-react, sonner | Quelli previsti da shadcn/ui. Il componente degli avvisi è senza next-themes, perché l'app non cambia tema |
 | Mappe | react-leaflet + OpenStreetMap | Posizione dei cantieri |
 | Gantt (fase 2) | SVAR React Gantt | Open source |
 | App installabile | vite-plugin-pwa | Icona sul telefono per i capi cantiere |
@@ -121,6 +121,19 @@ Il primo esempio è l'elenco Clienti (`src/features/clients/`).
 - **Ricerca.** `SearchFilter` applica il testo dopo una breve pausa nella digitazione e non aggiunge una voce alla cronologia per ogni lettera.
 - **Telefono.** Ogni riga diventa una scheda (`renderCard`). Non c'è ancora un comando per cambiare l'ordinamento.
 
+### Form e schede
+
+Il primo esempio è il cliente: `src/features/clients/` (scheda, nuovo, modifica).
+
+- **Regole in `schemas.ts`.** Lo schema Zod ripete le regole del backend (obbligatori, lunghezze, email), così la maggior parte degli errori si vede prima di salvare. I messaggi dello schema sono id di `src/i18n/it.ts`: il campo li traduce. Il backend controlla di nuovo.
+- **`EntityForm`** (`src/components/common/`) gestisce il salvataggio:
+  - un 422 mette i messaggi del backend sotto i campi e porta il cursore sul primo;
+  - i messaggi per campi che il form non ha, un 403 e ogni altro errore compaiono sopra i pulsanti, senza cambiare pagina e senza perdere quello che si è scritto.
+- **Campi.** `TextField` e `SelectField` collegano etichetta, descrizione ed errore per i lettori di schermo. I campi vuoti si inviano come `null`, come chiede il contratto.
+- **Dopo il salvataggio** un avviso (sonner) conferma e si apre la scheda. La scheda prende la risposta del backend, e gli elenchi si ricaricano.
+- **Scheda e modifica** caricano il record nel loader della route, prima di aprirsi. Se l'API risponde 404 (record di un'altra azienda o inesistente), compare la pagina "non trovato o non accessibile" dentro il layout. Per questo `routes.ts` del modulo è una funzione che riceve il `queryClient`.
+- **Limiti attuali:** si esce da un form con modifiche non salvate senza nessun avviso, e non c'è controllo di modifiche fatte nel frattempo da altri.
+
 ## Struttura del codice
 
 ```
@@ -133,7 +146,7 @@ src/
                           DataTable, FilterBar, PageHeader, EntityForm, MoneyInput,
                           QuantityInput, StatusBadge, FileUploader, PermissionGate
   features/             un modulo per area, sempre con la stessa forma:
-    sites/                api.ts (query e modifiche)  routes.ts  schemas.ts
+    sites/                api.ts (query e modifiche)  routes.ts  schemas.ts  paths.ts
                           pages/  components/
     daily-reports/
     clients/  suppliers/  employees/  equipment/

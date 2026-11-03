@@ -39,7 +39,7 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                   ErrorBoundary: PageError,
                   children: [
                     { index: true, Component: HomePage },
-                    ...clientRoutes,
+                    ...clientRoutes(queryClient),
                     {
                       path: '*',
                       loader: () => {

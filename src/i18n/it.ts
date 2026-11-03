@@ -43,6 +43,41 @@ export const messages = {
   'clients.taxId': 'P.IVA o C.F.',
   'clients.city': 'Città',
   'clients.createdAt': 'Aggiunto il',
+  'clients.new': 'Nuovo cliente',
+  'clients.edit': 'Modifica',
+  'clients.editTitle': 'Modifica cliente',
+  'clients.created': 'Cliente aggiunto.',
+  'clients.updated': 'Modifiche salvate.',
+  'clients.section.main': 'Cliente',
+  'clients.section.tax': 'Dati fiscali',
+  'clients.section.contacts': 'Contatti',
+  'clients.section.address': 'Indirizzo',
+  'clients.name.hint': 'Ragione sociale, oppure nome e cognome.',
+  'clients.vatNumber': 'Partita IVA',
+  'clients.taxCode': 'Codice fiscale',
+  'clients.sdiCode': 'Codice destinatario SDI',
+  'clients.email': 'Email',
+  'clients.pec': 'PEC',
+  'clients.phone': 'Telefono',
+  'clients.street': 'Via e numero civico',
+  'clients.postalCode': 'CAP',
+  'clients.province': 'Provincia',
+  'clients.province.hint': 'La sigla, ad esempio TO.',
+  'clients.notes': 'Note',
+  'clients.vatRequired': 'La partita IVA è obbligatoria per le imprese.',
+  'clients.taxCodeRequired': 'Il codice fiscale è obbligatorio per i privati.',
+
+  'form.requiredNote': 'I campi con * sono obbligatori.',
+  'form.save': 'Salva',
+  'form.saving': 'Salvataggio…',
+  'form.cancel': 'Annulla',
+  'form.invalid': 'Controlla i dati inseriti.',
+  'form.forbidden': 'Il tuo ruolo non permette questa modifica.',
+  'form.failed': 'Non è stato possibile salvare. Riprova.',
+  'validation.required': 'Campo obbligatorio.',
+  'validation.email': 'Indirizzo email non valido.',
+  'validation.tooLong': 'Testo troppo lungo.',
+  'detail.empty': 'Non indicato',
 
   'home.greeting': 'Ciao, {name}',
   'home.membership': '{company}, come {role}',
@@ -63,6 +98,11 @@ export const messages = {
 } as const
 
 export type MessageId = keyof typeof messages
+
+/** For texts that may be an id (validation messages) or a text from the server (422 errors). */
+export function isMessageId(value: string): value is MessageId {
+  return Object.hasOwn(messages, value)
+}
 
 // Makes a missing or misspelled id a type error
 declare global {

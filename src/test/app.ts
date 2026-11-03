@@ -3,6 +3,7 @@ import { cleanup, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createElement } from 'react'
 import { createMemoryRouter, type DataRouter, type RouteObject } from 'react-router'
+import { toast } from 'sonner'
 import { afterEach } from 'vitest'
 import { api, setUnauthorizedHandler } from '@/api/client'
 import { App } from '@/app/App'
@@ -18,7 +19,8 @@ const routers: DataRouter[] = []
 /**
  * Call once at the top of a test file that renders the app (in jsdom): cookies work as in a
  * browser, the screen is a desktop unless the test calls setScreenWidth (src/test/media.ts), and
- * after each test the app is unmounted, the 401 handler and the screen width are reset.
+ * after each test the app is unmounted, the 401 handler and the screen width are reset, and the
+ * notices are dismissed.
  */
 export function setupAppTests() {
   installBrowserCookies()
@@ -35,6 +37,8 @@ export function setupAppTests() {
     for (const router of routers.splice(0)) router.dispose()
     setUnauthorizedHandler(() => {})
     setScreenWidth(DESKTOP_WIDTH)
+    // Sonner keeps its notices in the module: a new Toaster would show the previous test's again
+    toast.dismiss()
   })
 }
 
