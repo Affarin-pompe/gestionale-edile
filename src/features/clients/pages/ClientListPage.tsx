@@ -13,6 +13,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { useListParams } from '@/hooks/use-list-params'
 import { CLIENT_KINDS, CLIENT_SORTS, clientListQuery, type Client, type ClientKind } from '../api'
 import { ClientCard } from '../components/ClientCard'
+import { ClientKindBadge } from '../components/ClientKindBadge'
 import { ClientLink } from '../components/ClientLink'
 import { clientPaths } from '../paths'
 
@@ -26,7 +27,7 @@ const columns = column.columns([
   }),
   column.accessor('kind', {
     header: () => <FormattedMessage id="clients.kind" />,
-    cell: (info) => <FormattedMessage id={`clients.kind.${info.getValue()}`} />,
+    cell: (info) => <ClientKindBadge kind={info.getValue()} />,
     enableSorting: false,
   }),
   column.display({
@@ -56,6 +57,7 @@ export function ClientListPage() {
   const query = useQuery(
     clientListQuery(company.slug, {
       page: list.page,
+      perPage: list.perPage,
       sort: list.sort,
       search: list.search,
       kind,
@@ -64,7 +66,7 @@ export function ClientListPage() {
   const filtered = list.search.trim() !== '' || kind !== undefined || list.page > 1
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-5">
       <PageHeader
         title={<FormattedMessage id="clients.title" />}
         actions={
@@ -78,27 +80,32 @@ export function ClientListPage() {
           </PermissionGate>
         }
       />
-      <FilterBar>
-        <SearchFilter label="clients.search" value={list.search} onChange={list.setSearch} />
-        <NativeSelect
-          aria-label={intl.formatMessage({ id: 'clients.kind' })}
-          value={kind ?? ''}
-          onChange={(event) => list.setFilter(KIND, event.target.value || undefined)}
-        >
-          <NativeSelectOption value="">{intl.formatMessage({ id: 'list.all' })}</NativeSelectOption>
-          {CLIENT_KINDS.map((value) => (
-            <NativeSelectOption key={value} value={value}>
-              {intl.formatMessage({ id: `clients.kind.${value}` })}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </FilterBar>
       <DataTable
         columns={columns}
         query={query}
+        filters={
+          <FilterBar>
+            <SearchFilter label="clients.search" value={list.search} onChange={list.setSearch} />
+            <NativeSelect
+              aria-label={intl.formatMessage({ id: 'clients.kind' })}
+              value={kind ?? ''}
+              onChange={(event) => list.setFilter(KIND, event.target.value || undefined)}
+            >
+              <NativeSelectOption value="">
+                {intl.formatMessage({ id: 'list.all' })}
+              </NativeSelectOption>
+              {CLIENT_KINDS.map((value) => (
+                <NativeSelectOption key={value} value={value}>
+                  {intl.formatMessage({ id: `clients.kind.${value}` })}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </FilterBar>
+        }
         sort={list.sort}
         onSortChange={list.setSort}
         onPageChange={list.setPage}
+        onPerPageChange={list.setPerPage}
         getRowId={(client) => client.id}
         renderCard={(client) => <ClientCard client={client} />}
         empty={filtered ? 'list.noResults' : 'clients.empty'}

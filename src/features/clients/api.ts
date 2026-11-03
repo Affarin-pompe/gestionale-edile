@@ -16,7 +16,6 @@ export type ClientKind = components['schemas']['ClientKind']
 // The contract's sort values; the first is the list's default
 export const CLIENT_SORTS = ['name', '-name', '-created_at', 'created_at'] as const
 export const CLIENT_KINDS = ['company', 'person'] as const satisfies readonly ClientKind[]
-const PER_PAGE = 25
 
 const keys = {
   lists: (company: string) => ['companies', company, 'clients', 'list'] as const,
@@ -25,6 +24,7 @@ const keys = {
 
 export interface ClientListParams {
   page: number
+  perPage: number
   sort: (typeof CLIENT_SORTS)[number]
   search: string
   kind: ClientKind | undefined
@@ -40,7 +40,7 @@ export function clientListQuery(company: string, params: ClientListParams) {
             path: { company },
             query: {
               page: params.page,
-              per_page: PER_PAGE,
+              per_page: params.perPage,
               sort: params.sort,
               search: params.search.trim() || undefined,
               filter: params.kind ? { kind: params.kind } : undefined,

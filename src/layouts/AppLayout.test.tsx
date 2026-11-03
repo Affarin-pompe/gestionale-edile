@@ -5,7 +5,13 @@ import { describe, expect, it } from 'vitest'
 import type { Me } from '@/auth/me'
 import { messages } from '@/i18n/it'
 import { server } from '@/mocks/node'
-import { renderApp, setupAppTests, signIn } from '@/test/app'
+import {
+  linkOutsideBreadcrumbs,
+  linksOutsideBreadcrumbs,
+  renderApp,
+  setupAppTests,
+  signIn,
+} from '@/test/app'
 import { PHONE_WIDTH, setScreenWidth } from '@/test/media'
 
 setupAppTests()
@@ -20,8 +26,9 @@ const CLIENTS = messages['menu.clients']
 const TOGGLE = messages['ui.sidebar.toggle']
 
 const findHeading = (name: string) => screen.findByRole('heading', { name })
-const menuLink = (name: string) => screen.getByRole('link', { name })
-const queryMenuLink = (name: string) => screen.queryByRole('link', { name })
+// Outside the breadcrumbs of the header, which have steps with the same names
+const menuLink = (name: string) => linkOutsideBreadcrumbs(name)
+const queryMenuLink = (name: string) => linksOutsideBreadcrumbs(name)[0] ?? null
 /** The button at the top of the menu, which shows the company in the URL. */
 const switcherButton = (company: string) =>
   screen.getByRole('button', { name: new RegExp(`^${company.replaceAll('.', '\\.')}`) })
@@ -116,7 +123,7 @@ describe('side menu', () => {
     async (email) => {
       await signIn(email)
       renderApp('/impresa-rossi')
-      await screen.findByRole('link', { name: DASHBOARD })
+      await waitFor(() => menuLink(DASHBOARD))
 
       expect(menuLink(CLIENTS)).toBeTruthy()
       expect(screen.getByText(REGISTRY)).toBeTruthy()
@@ -136,7 +143,7 @@ describe('side menu', () => {
   it('links to the pages of the company in the URL', async () => {
     await signIn(TITOLARE)
     renderApp('/costruzioni-verdi')
-    await screen.findByRole('link', { name: DASHBOARD })
+    await waitFor(() => menuLink(DASHBOARD))
 
     expect(menuLink(DASHBOARD).getAttribute('href')).toBe('/costruzioni-verdi')
     expect(menuLink(CLIENTS).getAttribute('href')).toBe('/costruzioni-verdi/anagrafiche/clienti')
@@ -151,7 +158,7 @@ describe('side menu', () => {
   it('marks Dashboard as the current page only on the dashboard', async () => {
     await signIn(TITOLARE)
     renderApp('/impresa-rossi')
-    await screen.findByRole('link', { name: DASHBOARD })
+    await waitFor(() => menuLink(DASHBOARD))
 
     expect(menuLink(DASHBOARD).getAttribute('href')).toBe('/impresa-rossi')
     expect(menuLink(CLIENTS).getAttribute('href')).toBe('/impresa-rossi/anagrafiche/clienti')
@@ -164,7 +171,7 @@ describe('side menu', () => {
     async (url) => {
       await signIn(TITOLARE)
       renderApp(url)
-      await screen.findByRole('link', { name: DASHBOARD })
+      await waitFor(() => menuLink(DASHBOARD))
 
       expect(isCurrent(menuLink(CLIENTS))).toBe(true)
       expect(isNotCurrent(menuLink(DASHBOARD))).toBe(true)
@@ -174,7 +181,7 @@ describe('side menu', () => {
   it('following Clienti opens its URL inside the same layout', async () => {
     await signIn(TITOLARE)
     const { router, user } = renderApp('/impresa-rossi')
-    await screen.findByRole('link', { name: DASHBOARD })
+    await waitFor(() => menuLink(DASHBOARD))
 
     await user.click(menuLink(CLIENTS))
 

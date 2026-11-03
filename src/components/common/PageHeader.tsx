@@ -22,15 +22,15 @@ export function PageHeader({
       {back && (
         <Link
           to={back.to}
-          className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          className="flex w-fit items-center gap-1 text-2sm text-muted-foreground hover:text-foreground md:hidden"
         >
           <ArrowLeft className="size-4" aria-hidden="true" />
           {back.label}
         </Link>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="font-heading text-2xl font-semibold break-words">{title}</h1>
-        {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+        <h1 className="font-heading text-xl leading-tight font-medium break-words">{title}</h1>
+        {actions && <div className="flex flex-wrap gap-2.5">{actions}</div>}
       </div>
     </div>
   )

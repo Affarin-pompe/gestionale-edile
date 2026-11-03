@@ -14,17 +14,22 @@ export const messages = {
   'logout.submit': 'Esci',
 
   'menu.dashboard': 'Dashboard',
+  'crumb.notFound': 'Non trovato',
   'menu.registry': 'Anagrafiche',
   'menu.clients': 'Clienti',
   'layout.companies': 'Le tue aziende',
 
+  'ui.breadcrumb': 'Percorso',
   'ui.close': 'Chiudi',
+  'ui.more': 'Altro',
   'ui.sidebar.title': 'Menu',
   'ui.sidebar.description': 'Le sezioni del gestionale.',
   'ui.sidebar.toggle': 'Apri o chiudi il menu',
 
   'list.results': '{total, plural, one {# risultato} other {# risultati}}',
-  'list.page': 'pagina {page} di {pages}',
+  'list.range': '{from}–{to} di {total}',
+  'list.perPage': 'Righe per pagina',
+  'list.goToPage': 'Pagina {page}',
   'list.pagination': "Pagine dell'elenco",
   'list.previous': 'Precedente',
   'list.next': 'Successiva',
@@ -34,6 +39,7 @@ export const messages = {
   'list.all': 'Tutti',
 
   'clients.title': 'Clienti',
+  'clients.one': 'Cliente',
   'clients.empty': 'Non ci sono ancora clienti.',
   'clients.search': 'Cerca per nome, P.IVA, C.F. o città',
   'clients.kind': 'Tipo',

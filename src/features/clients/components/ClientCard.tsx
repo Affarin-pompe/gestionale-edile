@@ -6,7 +6,7 @@ import { ClientLink } from './ClientLink'
 export function ClientCard({ client }: { client: Client }) {
   const taxId = client.vat_number ?? client.tax_code
   return (
-    <article className="relative rounded-lg border p-3 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring">
+    <article className="relative px-5 py-3 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring has-[a:focus-visible]:ring-inset">
       <h2>
         {/* The link's area covers the card, so the whole card can be tapped */}
         <ClientLink client={client} className="outline-none after:absolute after:inset-0" />

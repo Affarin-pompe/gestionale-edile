@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 import { screen, waitFor, within } from '@testing-library/react'
+import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it } from 'vitest'
+import type { Me } from '@/auth/me'
 import { messages } from '@/i18n/it'
 import { db } from '@/mocks/db'
-import { renderApp, setupAppTests, signIn } from '@/test/app'
+import { server } from '@/mocks/node'
+import {
+  linkOutsideBreadcrumbs,
+  linksOutsideBreadcrumbs,
+  renderApp,
+  setupAppTests,
+  signIn,
+} from '@/test/app'
 import { countRequests } from '@/test/cookies'
 import { PHONE_WIDTH, setScreenWidth } from '@/test/media'
 import type { Client } from '../api'
@@ -22,7 +31,12 @@ const T = messages
 
 const findHeading = (name: string) => screen.findByRole('heading', { name, level: 1 })
 const main = () => screen.getByRole('main')
-const queryLink = (name: string) => within(main()).queryByRole('link', { name })
+/** The page's link with this name; the breadcrumbs, also in the page, do not count. */
+const queryLink = (name: string) => {
+  const links = linksOutsideBreadcrumbs(name, main())
+  if (links.length > 1) throw new Error(`More than one link "${name}" in the page`)
+  return links[0] ?? null
+}
 
 /** Every label of the page with the value under it. */
 function details() {
@@ -77,8 +91,8 @@ async function open(url: string, email = TITOLARE) {
 async function expectNotFoundInLayout() {
   await findHeading(T['error.notFound.title'])
   // Inside the layout: the menu is still there
-  expect(screen.getByRole('link', { name: T['menu.dashboard'] })).toBeTruthy()
-  expect(screen.getByRole('link', { name: T['menu.clients'] })).toBeTruthy()
+  expect(linkOutsideBreadcrumbs(T['menu.dashboard'])).toBeTruthy()
+  expect(linkOutsideBreadcrumbs(T['menu.clients'])).toBeTruthy()
   expect(screen.getAllByRole('main')).toHaveLength(1)
 }
 
@@ -158,7 +172,7 @@ describe('client page', () => {
     const { router, user } = await open(FERRI_URL)
     await findHeading('Edil Ferri S.r.l.')
 
-    await user.click(within(main()).getByRole('link', { name: T['clients.title'] }))
+    await user.click(linkOutsideBreadcrumbs(T['clients.title'], main()))
 
     await waitFor(() => expect(router.state.location.pathname).toBe(LIST_URL))
     await findHeading(T['clients.title'])
@@ -168,7 +182,7 @@ describe('client page', () => {
 describe('who can add and change clients', () => {
   it('titolare sees "Nuovo cliente" in the list and "Modifica" on a client', async () => {
     const { user } = await open(LIST_URL)
-    await screen.findByText('60 risultati · pagina 1 di 3')
+    await screen.findByText('60 risultati')
 
     expect(queryLink(T['clients.new'])?.getAttribute('href')).toBe(NEW_URL)
 
@@ -180,7 +194,7 @@ describe('who can add and change clients', () => {
 
   it('capocantiere, who can only view, has no "Nuovo cliente" in the list', async () => {
     await open(LIST_URL, CAPOCANTIERE)
-    await screen.findByText('60 risultati · pagina 1 di 3')
+    await screen.findByText('60 risultati')
 
     expect(queryLink(T['clients.new'])).toBeNull()
     expect(screen.queryByRole('button', { name: T['clients.new'] })).toBeNull()
@@ -205,6 +219,32 @@ describe('who can add and change clients', () => {
     expect(screen.queryByRole('button', { name: T['form.save'] })).toBeNull()
     expect(screen.queryByRole('textbox')).toBeNull()
     expect(router.state.location.pathname).toBe(url)
+  })
+
+  it('who can change clients but not see them gets the not-found page on the edit form, without loading the client', async () => {
+    const updateOnly: Me = {
+      id: 'u-test-solo-modifica',
+      name: 'Paola Verdi',
+      email: 'paola@example.test',
+      companies: [
+        {
+          slug: 'impresa-rossi',
+          name: 'Impresa Rossi S.r.l.',
+          role: 'Contabile',
+          permissions: ['clients.create', 'clients.update'],
+        },
+      ],
+    }
+    await signIn(TITOLARE)
+    server.use(http.get('*/api/me', () => HttpResponse.json(updateOnly)))
+    const { router } = renderApp(EDIT_URL)
+
+    await findHeading(T['error.notFound.title'])
+    expect(linkOutsideBreadcrumbs(T['menu.dashboard'])).toBeTruthy()
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.queryByRole('button', { name: T['form.save'] })).toBeNull()
+    expect(router.state.location.pathname).toBe(EDIT_URL)
+    expect(countRequests('GET', `${ROSSI_CLIENTS_PATH}/impresa-rossi-001`)).toBe(0)
   })
 })
 
@@ -244,7 +284,7 @@ describe('clients that cannot be opened', () => {
 describe('opening a client from the list', () => {
   it("the name in the table links to the client's page", async () => {
     const { router, user } = await open(LIST_URL)
-    await screen.findByText('60 risultati · pagina 1 di 3')
+    await screen.findByText('60 risultati')
     const row = screen.getByRole('row', { name: /^Anna Ricci/ })
 
     await user.click(within(row).getByRole('link', { name: 'Anna Ricci' }))
@@ -256,7 +296,7 @@ describe('opening a client from the list', () => {
   it("on a phone, each card is a link named after the client, to the client's page", async () => {
     setScreenWidth(PHONE_WIDTH)
     const { router, user } = await open(LIST_URL)
-    await screen.findByText('60 risultati · pagina 1 di 3')
+    await screen.findByText('60 risultati')
     const card = screen
       .getByRole('heading', { name: 'Edil Ferri S.r.l.', level: 2 })
       .closest('article')

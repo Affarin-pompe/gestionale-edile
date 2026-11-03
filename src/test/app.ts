@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createElement } from 'react'
 import { createMemoryRouter, type DataRouter, type RouteObject } from 'react-router'
@@ -10,6 +10,7 @@ import { App } from '@/app/App'
 import { createQueryClient } from '@/app/query-client'
 import { createRoutes } from '@/app/routes'
 import { expireSession } from '@/auth/session'
+import { messages } from '@/i18n/it'
 import { MOCK_PASSWORD } from '@/mocks/data'
 import { installBrowserCookies } from './cookies'
 import { DESKTOP_WIDTH, installMatchMedia, setScreenWidth } from './media'
@@ -84,4 +85,29 @@ export async function signIn(email: string) {
 /** The ?da= parameter of the router's current URL. */
 export function returnParam(router: DataRouter) {
   return new URLSearchParams(router.state.location.search).get('da')
+}
+
+/** The breadcrumbs in the header of the pages inside a company. */
+export function breadcrumbs() {
+  return screen.getByRole('navigation', { name: messages['ui.breadcrumb'] })
+}
+
+/**
+ * The links with this name that are not steps of the breadcrumbs: those repeat the names of
+ * the menu ("Dashboard", "Clienti") and of the pages' back links.
+ */
+export function linksOutsideBreadcrumbs(name: string, container: HTMLElement = document.body) {
+  const crumbs = screen.queryByRole('navigation', { name: messages['ui.breadcrumb'] })
+  return within(container)
+    .queryAllByRole('link', { name })
+    .filter((link) => !crumbs?.contains(link))
+}
+
+/** The one link with this name outside the breadcrumbs (see linksOutsideBreadcrumbs). */
+export function linkOutsideBreadcrumbs(name: string, container?: HTMLElement) {
+  const links = linksOutsideBreadcrumbs(name, container)
+  if (links.length !== 1) {
+    throw new Error(`Expected one link "${name}" outside the breadcrumbs, found ${links.length}`)
+  }
+  return links[0] as HTMLElement
 }

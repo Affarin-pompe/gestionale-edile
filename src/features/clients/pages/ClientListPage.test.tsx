@@ -8,8 +8,16 @@ import { createRoutes } from '@/app/routes'
 import type { Me } from '@/auth/me'
 import { messages } from '@/i18n/it'
 import { seedClients } from '@/mocks/data'
+import { db } from '@/mocks/db'
 import { server } from '@/mocks/node'
-import { renderApp, renderRoutes, setupAppTests, signIn } from '@/test/app'
+import {
+  linkOutsideBreadcrumbs,
+  linksOutsideBreadcrumbs,
+  renderApp,
+  renderRoutes,
+  setupAppTests,
+  signIn,
+} from '@/test/app'
 import { countRequests, sentRequests } from '@/test/cookies'
 import { PHONE_WIDTH, setScreenWidth } from '@/test/media'
 
@@ -66,6 +74,37 @@ const rowNames = () =>
     (row) => row.querySelector('td')?.textContent,
   )
 
+const pagination = () => screen.getByRole('navigation', { name: T['list.pagination'] })
+const queryPagination = () => screen.queryByRole('navigation', { name: T['list.pagination'] })
+const perPageSelect = () =>
+  screen.getByRole<HTMLSelectElement>('combobox', { name: T['list.perPage'] })
+/** What the pagination shows between Precedente and Successiva: page numbers and "…". */
+const pageSteps = () => {
+  const previous = within(pagination()).getByRole('button', { name: T['list.previous'] })
+  return Array.from(previous.parentElement?.children ?? [], (step) => step.textContent).slice(1, -1)
+}
+/** The names of the pagination's buttons, as a screen reader reads them. */
+const paginationButtons = () =>
+  within(pagination())
+    .getAllByRole('button')
+    .map((b) => b.getAttribute('aria-label'))
+/** The page buttons marked as the current page. */
+const currentPages = () =>
+  within(pagination())
+    .queryAllByRole('button', { current: 'page' })
+    .map((b) => b.getAttribute('aria-label'))
+
+/** Adds clients to Impresa Rossi, after the 60 of the seed data, for longer lists. */
+function addClients(count: number) {
+  const clients = (db.clients['impresa-rossi'] ??= [])
+  const model = clients[0]
+  if (!model) throw new Error('No seed clients')
+  for (let i = 1; i <= count; i++) {
+    const n = String(i).padStart(3, '0')
+    clients.push({ ...model, id: `impresa-rossi-extra-${n}`, name: `Cliente aggiunto ${n}` })
+  }
+}
+
 /** Signs in, opens the URL and waits until the list has loaded. */
 async function openList(url = LIST_URL) {
   await signIn(TITOLARE)
@@ -110,6 +149,10 @@ describe('list parameters in the URL', () => {
     ['ordine=', { sort: 'name' }],
     ['tipo=altro', {}],
     ['tipo=Company', {}],
+    ['per_pagina=30', {}],
+    ['per_pagina=0', {}],
+    ['per_pagina=abc', {}],
+    ['per_pagina=1000', {}],
     [`cerca=${'x'.repeat(100)}yz`, { search: 'x'.repeat(100) }],
   ])('?%s is replaced by a valid value, without errors', async (query, expected) => {
     await openList(`${LIST_URL}?${query}`)
@@ -230,14 +273,15 @@ describe('search box', () => {
   it('sends one request with the whole text once typing stops, replacing the history entry', async () => {
     await signIn(TITOLARE)
     const { router, user } = renderApp('/impresa-rossi')
-    await user.click(await screen.findByRole('link', { name: T['menu.clients'] }))
+    await user.click(await waitFor(() => linkOutsideBreadcrumbs(T['menu.clients'])))
     await waitFor(() => expect(isBusy()).toBe('false'))
     listRequests.length = 0
 
     await user.type(searchBox(), 'Ferri')
 
     await waitFor(() => expect(urlParams(router)).toEqual({ cerca: 'Ferri' }))
-    await screen.findByText('3 risultati · pagina 1 di 1')
+    await screen.findByText('3 risultati')
+    expect(within(pagination()).getByText('1–3 di 3')).toBeTruthy()
     expect(rowNames()).toEqual(['Condominio Via Ferri', 'Edil Ferri S.r.l.', 'Paolo Ferri'])
     expect(sentSearches()).toEqual(['Ferri'])
     expect(router.state.historyAction).toBe('REPLACE')
@@ -301,12 +345,13 @@ describe('search box', () => {
   })
 
   it('keeps letters typed while its previous text is still reaching the URL', async () => {
-    // The client list's loader waits for `gate`: the URL changes only when it opens
+    // The client list's loader (the index of anagrafiche/clienti) waits for `gate`:
+    // the URL changes only when it opens
     const gate: { wait?: Promise<void> } = {}
-    const withGate = (routes: RouteObject[]): RouteObject[] =>
+    const withGate = (routes: RouteObject[], parent?: string): RouteObject[] =>
       routes.map((route) => {
-        if (route.children) return { ...route, children: withGate(route.children) }
-        if (route.path !== 'anagrafiche/clienti') return route
+        if (route.children) return { ...route, children: withGate(route.children, route.path) }
+        if (!route.index || parent !== 'anagrafiche/clienti') return route
         const loader = route.loader
         return {
           ...route,
@@ -419,33 +464,69 @@ describe('table', () => {
 })
 
 describe('pagination', () => {
-  it('counts results and pages, and moves between them', async () => {
+  it('counts the results, shows which rows are on screen, and Successiva and Precedente move by one', async () => {
     const { router, user } = await openList()
 
-    expect(screen.getByText('60 risultati · pagina 1 di 3')).toBeTruthy()
+    expect(screen.getByText('60 risultati')).toBeTruthy()
+    expect(within(pagination()).getByText('1–25 di 60')).toBeTruthy()
+    expect(pageSteps()).toEqual(['1', '2', '3'])
+    expect(currentPages()).toEqual(['Pagina 1'])
     expect(button(T['list.previous'])).toHaveProperty('disabled', true)
     expect(button(T['list.next'])).toHaveProperty('disabled', false)
 
     await user.click(button(T['list.next']))
 
     await waitFor(() => expect(urlParams(router)).toEqual({ pagina: '2' }))
-    await screen.findByText('60 risultati · pagina 2 di 3')
+    await within(pagination()).findByText('26–50 di 60')
     expect(rowNames()).toEqual(ROSSI_BY_NAME.slice(25, 50))
     expect(lastListQuery()).toMatchObject({ page: '2' })
+    expect(currentPages()).toEqual(['Pagina 2'])
 
     await user.click(button(T['list.next']))
 
-    await screen.findByText('60 risultati · pagina 3 di 3')
+    await within(pagination()).findByText('51–60 di 60')
     expect(urlParams(router)).toEqual({ pagina: '3' })
     expect(rowNames()).toEqual(ROSSI_BY_NAME.slice(50))
+    expect(currentPages()).toEqual(['Pagina 3'])
     expect(button(T['list.next'])).toHaveProperty('disabled', true)
     expect(button(T['list.previous'])).toHaveProperty('disabled', false)
+
+    await user.click(button(T['list.previous']))
+
+    await waitFor(() => expect(urlParams(router)).toEqual({ pagina: '2' }))
+    await within(pagination()).findByText('26–50 di 60')
+    expect(rowNames()).toEqual(ROSSI_BY_NAME.slice(25, 50))
   })
 
-  it('says "1 risultato" when one client matches', async () => {
+  it('a page number opens that page; page 1 takes pagina out of the URL', async () => {
+    const { router, user } = await openList()
+
+    await user.click(button('Pagina 3'))
+
+    await waitFor(() => expect(urlParams(router)).toEqual({ pagina: '3' }))
+    await within(pagination()).findByText('51–60 di 60')
+    expect(rowNames()).toEqual(ROSSI_BY_NAME.slice(50))
+    expect(lastListQuery()).toMatchObject({ page: '3' })
+    expect(currentPages()).toEqual(['Pagina 3'])
+    expect(router.state.historyAction).toBe('PUSH')
+
+    await user.click(button('Pagina 1'))
+
+    await waitFor(() => expect(router.state.location.search).toBe(''))
+    await within(pagination()).findByText('1–25 di 60')
+    expect(rowNames()).toEqual(ROSSI_BY_NAME.slice(0, 25))
+    expect(currentPages()).toEqual(['Pagina 1'])
+  })
+
+  it('says "1 risultato" when one client matches, on a single page', async () => {
     await openList(`${LIST_URL}?cerca=Edil Ferri`)
 
-    expect(screen.getByText('1 risultato · pagina 1 di 1')).toBeTruthy()
+    expect(screen.getByText('1 risultato')).toBeTruthy()
+    expect(within(pagination()).getByText('1–1 di 1')).toBeTruthy()
+    expect(pageSteps()).toEqual(['1'])
+    expect(currentPages()).toEqual(['Pagina 1'])
+    expect(button(T['list.previous'])).toHaveProperty('disabled', true)
+    expect(button(T['list.next'])).toHaveProperty('disabled', true)
     expect(rowNames()).toEqual(['Edil Ferri S.r.l.'])
   })
 
@@ -454,12 +535,146 @@ describe('pagination', () => {
 
     expect(screen.getByText(T['list.noResults'])).toBeTruthy()
     expect(screen.queryByRole('table')).toBeNull()
+    // No rows, so no range; the pages that exist, none of them current
+    expect(within(pagination()).queryByText(/ di 60$/)).toBeNull()
+    expect(pageSteps()).toEqual(['1', '2', '3'])
+    expect(currentPages()).toEqual([])
+    expect(button(T['list.next'])).toHaveProperty('disabled', true)
 
     await user.click(button(T['list.previous']))
 
     await waitFor(() => expect(urlParams(router)).toEqual({ pagina: '3' }))
-    await screen.findByText('60 risultati · pagina 3 di 3')
+    await within(pagination()).findByText('51–60 di 60')
     expect(rowNames()).toEqual(ROSSI_BY_NAME.slice(50))
+    expect(currentPages()).toEqual(['Pagina 3'])
+  })
+
+  // 200 clients, 10 per page: 20 pages
+  it.each([
+    [1, ['1', '2', '…', '20']],
+    [2, ['1', '2', '3', '…', '20']],
+    [3, ['1', '2', '3', '4', '…', '20']],
+    [4, ['1', '2', '3', '4', '5', '…', '20']],
+    [5, ['1', '…', '4', '5', '6', '…', '20']],
+    [10, ['1', '…', '9', '10', '11', '…', '20']],
+    [16, ['1', '…', '15', '16', '17', '…', '20']],
+    [17, ['1', '…', '16', '17', '18', '19', '20']],
+    [18, ['1', '…', '17', '18', '19', '20']],
+    [19, ['1', '…', '18', '19', '20']],
+    [20, ['1', '…', '19', '20']],
+  ])(
+    'on page %i of 20 shows the first, the last and the pages next to it: %j',
+    async (page, steps) => {
+      addClients(140)
+      await openList(`${LIST_URL}?per_pagina=10&pagina=${page}`)
+
+      expect(screen.getByText('200 risultati')).toBeTruthy()
+      const range = `${(page - 1) * 10 + 1}–${page * 10} di 200`
+      expect(within(pagination()).getByText(range)).toBeTruthy()
+      expect(pageSteps()).toEqual(steps)
+      expect(currentPages()).toEqual([`Pagina ${page}`])
+      // The dots are not read; the page buttons are, with their number
+      for (const gap of within(pagination()).queryAllByText('…')) {
+        expect(gap.getAttribute('aria-hidden')).toBe('true')
+        expect(gap.tagName).not.toBe('BUTTON')
+      }
+      expect(paginationButtons()).toEqual([
+        T['list.previous'],
+        ...steps.filter((s) => s !== '…').map((n) => `Pagina ${n}`),
+        T['list.next'],
+      ])
+    },
+  )
+
+  it('a page number past the dots opens that page, keeping the rows per page', async () => {
+    addClients(140)
+    const { router, user } = await openList(`${LIST_URL}?per_pagina=10&pagina=10`)
+
+    await user.click(button('Pagina 20'))
+
+    await waitFor(() => expect(urlParams(router)).toEqual({ per_pagina: '10', pagina: '20' }))
+    await within(pagination()).findByText('191–200 di 200')
+    expect(lastListQuery()).toEqual({ page: '20', per_page: '10', sort: 'name' })
+    expect(pageSteps()).toEqual(['1', '…', '19', '20'])
+    expect(rowNames()).toHaveLength(10)
+
+    await user.click(button('Pagina 1'))
+
+    await waitFor(() => expect(urlParams(router)).toEqual({ per_pagina: '10' }))
+    await within(pagination()).findByText('1–10 di 200')
+    expect(pageSteps()).toEqual(['1', '2', '…', '20'])
+  })
+})
+
+describe('rows per page', () => {
+  it('asks the API for the rows per page of the URL, and shows them in "Righe per pagina"', async () => {
+    await openList(`${LIST_URL}?per_pagina=10`)
+
+    expect(lastListQuery()).toEqual({ page: '1', per_page: '10', sort: 'name' })
+    expect(rowNames()).toEqual(ROSSI_BY_NAME.slice(0, 10))
+    expect(perPageSelect().value).toBe('10')
+    expect(within(pagination()).getByText('1–10 di 60')).toBeTruthy()
+    expect(pageSteps()).toEqual(['1', '2', '…', '6'])
+  })
+
+  it('offers 10, 25, 50 and 100 rows, 25 when the URL says nothing', async () => {
+    await openList()
+
+    expect(
+      Array.from(perPageSelect().options, (option) => [option.value, option.textContent]),
+    ).toEqual([
+      ['10', '10'],
+      ['25', '25'],
+      ['50', '50'],
+      ['100', '100'],
+    ])
+    expect(perPageSelect().value).toBe('25')
+  })
+
+  it('changing it updates the URL and the rows, and goes back to page 1', async () => {
+    const { router, user } = await openList(`${LIST_URL}?pagina=2&ordine=-name`)
+    const byNameDesc = [...ROSSI_BY_NAME].reverse()
+
+    await user.selectOptions(perPageSelect(), '50')
+
+    await waitFor(() => expect(urlParams(router)).toEqual({ per_pagina: '50', ordine: '-name' }))
+    expect(router.state.historyAction).toBe('PUSH')
+    await waitFor(() =>
+      expect(lastListQuery()).toEqual({ page: '1', per_page: '50', sort: '-name' }),
+    )
+    await within(pagination()).findByText('1–50 di 60')
+    expect(rowNames()).toEqual(byNameDesc.slice(0, 50))
+    expect(perPageSelect().value).toBe('50')
+    expect(pageSteps()).toEqual(['1', '2'])
+
+    await user.click(button('Pagina 2'))
+    await within(pagination()).findByText('51–60 di 60')
+    expect(urlParams(router)).toEqual({ per_pagina: '50', ordine: '-name', pagina: '2' })
+
+    // Back to 25, the default: per_pagina leaves the URL, and the page goes back to 1
+    await user.selectOptions(perPageSelect(), '25')
+
+    await waitFor(() => expect(urlParams(router)).toEqual({ ordine: '-name' }))
+    await within(pagination()).findByText('1–25 di 60')
+    expect(lastListQuery()).toEqual({ page: '1', per_page: '25', sort: '-name' })
+    expect(rowNames()).toEqual(byNameDesc.slice(0, 25))
+  })
+
+  it('100 rows fit the whole list in one page', async () => {
+    await openList(`${LIST_URL}?per_pagina=100`)
+
+    expect(perPageSelect().value).toBe('100')
+    expect(rowNames()).toEqual(ROSSI_BY_NAME)
+    expect(within(pagination()).getByText('1–60 di 60')).toBeTruthy()
+    expect(pageSteps()).toEqual(['1'])
+  })
+
+  it('rows per page that are not a choice ask for 25', async () => {
+    await openList(`${LIST_URL}?per_pagina=30`)
+
+    expect(lastListQuery()).toMatchObject({ per_page: '25' })
+    expect(perPageSelect().value).toBe('25')
+    expect(rowNames()).toHaveLength(25)
   })
 })
 
@@ -513,9 +728,10 @@ describe('empty and failed lists', () => {
 
     expect(screen.getByText(T['clients.empty'])).toBeTruthy()
     expect(screen.queryByText(T['list.noResults'])).toBeNull()
+    expect(queryPagination()).toBeNull()
     expect(queryButton(T['list.previous'])).toBeNull()
     expect(queryButton(T['list.next'])).toBeNull()
-    expect(screen.queryByText(/risultat/)).toBeNull()
+    expect(screen.queryByRole('combobox', { name: T['list.perPage'] })).toBeNull()
   })
 
   it('a search without matches says there are no results, without pagination', async () => {
@@ -523,7 +739,9 @@ describe('empty and failed lists', () => {
 
     expect(screen.getByText(T['list.noResults'])).toBeTruthy()
     expect(screen.queryByText(T['clients.empty'])).toBeNull()
+    expect(queryPagination()).toBeNull()
     expect(queryButton(T['list.next'])).toBeNull()
+    expect(screen.queryByRole('combobox', { name: T['list.perPage'] })).toBeNull()
   })
 
   it('a filter without matches says there are no results', async () => {
@@ -574,7 +792,7 @@ describe('empty and failed lists', () => {
     // Still the list page inside the layout, not an error page
     expect(screen.getByRole('heading', { name: T['clients.title'] })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: T['error.forbidden.title'] })).toBeNull()
-    expect(screen.getByRole('link', { name: T['menu.dashboard'] })).toBeTruthy()
+    expect(linkOutsideBreadcrumbs(T['menu.dashboard'])).toBeTruthy()
     expect(router.state.location.pathname).toBe(LIST_URL)
     expect(urlParams(router)).toEqual({ ordine: '-name' })
     expect(countRequests('GET', ROSSI_API_PATH)).toBe(1)
@@ -602,8 +820,8 @@ describe('route, menu and company', () => {
     const { router } = renderApp(LIST_URL)
 
     await findHeading(T['error.notFound.title'])
-    expect(screen.getByRole('link', { name: T['menu.dashboard'] })).toBeTruthy()
-    expect(screen.queryByRole('link', { name: T['menu.clients'] })).toBeNull()
+    expect(linkOutsideBreadcrumbs(T['menu.dashboard'])).toBeTruthy()
+    expect(linksOutsideBreadcrumbs(T['menu.clients'])).toEqual([])
     expect(screen.queryByRole('heading', { name: T['clients.title'] })).toBeNull()
     expect(router.state.location.pathname).toBe(LIST_URL)
     expect(listRequests).toEqual([])
@@ -612,20 +830,20 @@ describe('route, menu and company', () => {
   it('marks Clienti as the current page in the menu, also with parameters', async () => {
     await openList(`${LIST_URL}?pagina=2&ordine=-name`)
 
-    const link = screen.getByRole('link', { name: T['menu.clients'] })
+    const link = linkOutsideBreadcrumbs(T['menu.clients'])
     expect(link.getAttribute('aria-current')).toBe('page')
     expect(link.getAttribute('data-active')).toBe('true')
-    const dashboard = screen.getByRole('link', { name: T['menu.dashboard'] })
+    const dashboard = linkOutsideBreadcrumbs(T['menu.dashboard'])
     expect(dashboard.hasAttribute('aria-current')).toBe(false)
   })
 
   it('asks for the clients of the company in the URL, also after switching company', async () => {
     const { router } = await openList()
-    expect(screen.getByText('60 risultati · pagina 1 di 3')).toBeTruthy()
+    expect(screen.getByText('60 risultati')).toBeTruthy()
 
     await act(() => router.navigate('/costruzioni-verdi/anagrafiche/clienti'))
 
-    await screen.findByText('5 risultati · pagina 1 di 1')
+    await screen.findByText('5 risultati')
     await waitFor(() => expect(isBusy()).toBe('false'))
     const verdi = (seedClients()['costruzioni-verdi'] ?? []).map((c) => c.name)
     expect(rowNames()).toEqual(verdi.sort((a, b) => a.localeCompare(b, 'it')))
@@ -653,7 +871,9 @@ describe('on a phone', () => {
       'Edil Ferri S.r.l.Impresa · 10000000000 · Torino',
     )
     expect(card('Anna Ricci').textContent).toBe('Anna RicciPrivato · RICXYZ80A01L2192 · Novara')
-    expect(screen.getByText('60 risultati · pagina 1 di 3')).toBeTruthy()
+    expect(screen.getByText('60 risultati')).toBeTruthy()
+    expect(within(pagination()).getByText('1–25 di 60')).toBeTruthy()
+    expect(perPageSelect().value).toBe('25')
   })
 
   it('on a desktop the same list is a table, without cards', async () => {

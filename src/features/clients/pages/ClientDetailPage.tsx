@@ -7,8 +7,10 @@ import { useCompany } from '@/auth/me'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PermissionGate } from '@/components/common/PermissionGate'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import type { MessageId } from '@/i18n/it'
 import { clientQuery } from '../api'
+import { ClientKindBadge } from '../components/ClientKindBadge'
 import { clientPaths, useClientId } from '../paths'
 
 export function ClientDetailPage() {
@@ -22,7 +24,7 @@ export function ClientDetailPage() {
     .join(' ')
 
   return (
-    <div className="flex max-w-4xl flex-col gap-4 p-4">
+    <div className="flex max-w-4xl flex-col gap-5">
       <PageHeader
         back={{ to: paths.list, label: <FormattedMessage id="clients.title" /> }}
         title={client.name}
@@ -37,10 +39,10 @@ export function ClientDetailPage() {
           </PermissionGate>
         }
       />
-      <p className="text-muted-foreground">
-        <FormattedMessage id={`clients.kind.${client.kind}`} />
+      <p>
+        <ClientKindBadge kind={client.kind} />
       </p>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2">
         <DetailSection title="clients.section.tax">
           <Detail label="clients.vatNumber">{client.vat_number}</Detail>
           <Detail label="clients.taxCode">{client.tax_code}</Detail>
@@ -69,27 +71,31 @@ export function ClientDetailPage() {
 
 function Section({ title, children }: { title: MessageId; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-3 rounded-lg border p-4">
-      <h2 className="font-medium">
-        <FormattedMessage id={title} />
-      </h2>
-      {children}
-    </section>
+    <Card asChild>
+      <section>
+        <CardHeader>
+          <h2 className="font-heading text-base leading-none font-semibold">
+            <FormattedMessage id={title} />
+          </h2>
+        </CardHeader>
+        <CardContent>{children}</CardContent>
+      </section>
+    </Card>
   )
 }
 
 function DetailSection({ title, children }: { title: MessageId; children: ReactNode }) {
   return (
     <Section title={title}>
-      <dl className="flex flex-col gap-3">{children}</dl>
+      <dl className="flex flex-col gap-4">{children}</dl>
     </Section>
   )
 }
 
 function Detail({ label, children }: { label: MessageId; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-sm text-muted-foreground">
+    <div className="grid gap-0.5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-2.5">
+      <dt className="text-muted-foreground">
         <FormattedMessage id={label} />
       </dt>
       <dd className="break-words">{children || <Missing />}</dd>

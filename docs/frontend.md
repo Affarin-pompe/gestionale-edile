@@ -6,6 +6,15 @@ Bozza del 2 novembre 2026. Il backend è sviluppato a parte: questo documento co
 
 Il repository è pubblico, quindi la base è **shadcn/ui** (licenza MIT): componenti React costruiti su Radix e Tailwind, che la CLI copia dentro il progetto. I template ThemeForest sono esclusi perché la loro licenza vieta di pubblicarne il codice sorgente. Il confronto è in [ADR-0001](adr/0001-template-ui-e-repository-pubblico.md).
 
+L'aspetto è quello di **Metronic**. Lo danno i componenti di **ReUI** (MIT, stessi autori, installati con la CLI di shadcn/ui dal registry `@reui`) e un tema che riprende i valori della demo pubblica di Metronic:
+- blu come colore principale e grigi "zinc";
+- angoli di 0.5rem e il carattere di sistema;
+- pulsanti e campi alti 34px, con testo a 13px (`text-2sm`);
+- menu laterale bianco largo 280px;
+- intestazione alta 70px (60px su telefono), con le briciole di pane.
+
+Di Metronic non si copia nulla: né codice, né CSS, né icone, né immagini.
+
 Il frontend è un'app separata che parla con il backend solo via API ([ADR-0002](adr/0002-frontend-separato-via-api.md)). Il sito vetrina è un progetto a parte e non condivide codice con il gestionale.
 
 ## Stack del frontend
@@ -16,8 +25,9 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 |---|---|---|
 | Base | **Vite + React 19 + TypeScript** | App separata dal backend, servita come file statici |
 | Componenti | **shadcn/ui** (Radix + Tailwind 4), stile "nova" | Il codice sta nel progetto e ha licenza MIT: si modifica liberamente e può stare in un repository pubblico. Lo stile "nova" è la variante compatta, adatta a tabelle e form fitti |
+| Aspetto di Metronic | **ReUI**, registry `@reui` della CLI di shadcn/ui | Stessi autori di Metronic, licenza MIT: dà quell'aspetto senza il codice di Metronic. Si prendono solo i componenti che servono (per ora `badge`); nessuna dipendenza npm in più |
 | Supporto ai componenti | radix-ui, class-variance-authority, cn, tw-animate-css | Quelli che shadcn/ui richiede: componenti accessibili, varianti, unione delle classi, animazioni |
-| Carattere | Geist, con i file dentro il progetto (@fontsource) | Niente Google Fonts: la CSP può restare limitata al proprio dominio |
+| Carattere | Quello di sistema (`ui-sans-serif, system-ui`) | È quello della demo di Metronic. Nessun file da scaricare e nessun Google Fonts, quindi la CSP può restare limitata al proprio dominio |
 | Routing | **React Router 8**, modalità "data" (senza il framework) | Route annidate: layout, azienda nell'URL, schede del cantiere. I controlli di accesso e di azienda girano prima che la pagina si apra. La 8 è la versione attuale; il piano iniziale diceva 7 |
 | Dati dal server | **TanStack Query** | Cache, stati di caricamento, aggiornamento dopo le modifiche |
 | Tabelle | **TanStack Table 9** | Paginazione, ordinamento e filtri lato server. È anche la base della tabella di shadcn/ui. La 9 ha un'API diversa dalla 8, usata negli esempi di shadcn/ui |
@@ -34,17 +44,19 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 | App installabile | vite-plugin-pwa | Icona sul telefono per i capi cantiere |
 | Test | Vitest + Testing Library (con jsdom), Playwright | Vedi la sezione Test. jsdom simula il browser per i test delle pagine |
 
-**Punto di partenza:** il progetto si crea con Vite e la CLI di shadcn/ui; i componenti si aggiungono uno alla volta, quando servono. I blocchi già pronti di shadcn/ui (barra laterale, pagina di accesso, dashboard) sono la base dei layout **[da verificare: quali blocchi]**. Il tema (colori, caratteri, angoli) sta in un solo file CSS con le variabili di shadcn/ui: i colori dell'azienda si cambiano lì.
+**Punto di partenza:** il progetto si crea con Vite e la CLI di shadcn/ui; i componenti si aggiungono uno alla volta, quando servono. I blocchi già pronti di shadcn/ui (barra laterale, pagina di accesso, dashboard) sono la base dei layout **[da verificare: quali blocchi]**. Il tema (colori, caratteri, angoli) sta in un solo file CSS con le variabili di shadcn/ui, più i colori aggiuntivi di ReUI (`info`, `success`, `warning`, `invert`): i colori dell'azienda si cambiano lì.
 
 ## Layout
 
 | Uso | Layout | Da dove si parte |
 |---|---|---|
-| Tutta l'applicazione | **AppLayout**: barra laterale a sinistra (si riduce a icone, su telefono diventa un menu a scomparsa) + intestazione con azienda attiva e utente. Adatto a molti moduli | Blocco Sidebar di shadcn/ui |
+| Tutta l'applicazione | **AppLayout**: barra laterale a sinistra con azienda attiva e utente (si riduce a icone, su telefono diventa un menu a scomparsa) + intestazione con le briciole di pane. Adatto a molti moduli | Blocco Sidebar di shadcn/ui |
 | Accesso, password dimenticata, inviti | **AuthLayout**: con logo e colori dell'azienda | Blocco Login di shadcn/ui |
 | Pagine di errore (404, 500) | **ErrorLayout** | Da costruire: una pagina semplice |
 
 I layout sono route padre di React Router: le pagine dei moduli si inseriscono come route figlie.
+
+Le briciole di pane seguono le route: ogni route che è un passo del percorso dichiara `handle: { crumb }` (`RouteHandle`, in `src/app/route-handle.ts`). `crumb` è un id di `src/i18n/it.ts`, oppure un componente quando il nome viene dai dati, come il nome del cliente. Per questo le route di un modulo sono annidate come il percorso: elenco › scheda › modifica. Anche sulle pagine di errore le briciole seguono l'indirizzo; un indirizzo che non esiste finisce con "Non trovato". Su telefono le briciole non ci sono e `PageHeader` mostra il link indietro.
 
 ### Accesso e sessione
 - Prima di ogni pagina protetta un middleware carica `/api/me`. Senza sessione si va su `/accedi?da=<pagina>`, e dopo l'accesso si torna lì. Il parametro `da` è accettato solo se punta a una pagina dell'app, mai a un altro sito.
@@ -115,11 +127,12 @@ Tutte le pagine del gestionale sono una di queste cinque. Si costruiscono una vo
 
 Il primo esempio è l'elenco Clienti (`src/features/clients/`).
 
-- **Stato nell'URL.** Pagina, ordinamento, ricerca e filtri stanno nell'indirizzo (`?pagina=2&ordine=-created_at&cerca=rossi&tipo=company`), così un elenco filtrato si salva nei preferiti e si condivide. Se ne occupa `useListParams`. I valori che il backend rifiuterebbe tornano al predefinito. Cambiare ordinamento, ricerca o un filtro riporta alla prima pagina.
+- **Stato nell'URL.** Pagina, righe per pagina, ordinamento, ricerca e filtri stanno nell'indirizzo (`?pagina=2&per_pagina=50&ordine=-created_at&cerca=rossi&tipo=company`), così un elenco filtrato si salva nei preferiti e si condivide. Se ne occupa `useListParams`. I valori che il backend rifiuterebbe tornano al predefinito. Cambiare ordinamento, righe per pagina, ricerca o un filtro riporta alla prima pagina. Le righe per pagina sono 10, 25 (predefinito del contratto), 50 o 100.
+- **Aspetto.** Come in Metronic, l'elenco sta in una card: nell'intestazione il numero di risultati e i filtri (`filters` di `DataTable`), nel piè "Righe per pagina", l'intervallo mostrato ("1–25 di 60") e le pagine numerate.
 - **Lavoro del backend.** `DataTable` mostra una pagina già filtrata, ordinata e paginata dal backend. Una colonna è ordinabile solo se il suo id è un valore di `sort` del contratto.
 - **Stati.** `DataTable` gestisce caricamento, elenco vuoto, errore e paginazione. Per l'errore mostra "Riprova"; per il 403 solo il messaggio. Mentre arriva un'altra pagina resta visibile quella di prima, attenuata.
 - **Ricerca.** `SearchFilter` applica il testo dopo una breve pausa nella digitazione e non aggiunge una voce alla cronologia per ogni lettera.
-- **Telefono.** Ogni riga diventa una scheda (`renderCard`). Non c'è ancora un comando per cambiare l'ordinamento.
+- **Telefono.** Ogni riga diventa una scheda (`renderCard`), separata dalle altre da una linea dentro la card dell'elenco. Non c'è ancora un comando per cambiare l'ordinamento.
 
 ### Form e schede
 
@@ -130,6 +143,7 @@ Il primo esempio è il cliente: `src/features/clients/` (scheda, nuovo, modifica
   - un 422 mette i messaggi del backend sotto i campi e porta il cursore sul primo;
   - i messaggi per campi che il form non ha, un 403 e ogni altro errore compaiono sopra i pulsanti, senza cambiare pagina e senza perdere quello che si è scritto.
 - **Campi.** `TextField` e `SelectField` collegano etichetta, descrizione ed errore per i lettori di schermo. I campi vuoti si inviano come `null`, come chiede il contratto.
+- **Aspetto.** Come in Metronic: ogni `FormSection` è una card con il titolo nell'intestazione; dove la card è abbastanza larga l'etichetta sta a sinistra del campo, su telefono sopra. Il form è largo al massimo 620px e i pulsanti stanno in fondo a destra. Nella scheda ogni sezione è una card.
 - **Dopo il salvataggio** un avviso (sonner) conferma e si apre la scheda. La scheda prende la risposta del backend, e gli elenchi si ricaricano.
 - **Scheda e modifica** caricano il record nel loader della route, prima di aprirsi. Se l'API risponde 404 (record di un'altra azienda o inesistente), compare la pagina "non trovato o non accessibile" dentro il layout. Per questo `routes.ts` del modulo è una funzione che riceve il `queryClient`.
 - **Limiti attuali:** si esce da un form con modifiche non salvate senza nessun avviso, e non c'è controllo di modifiche fatte nel frattempo da altri.
@@ -142,6 +156,7 @@ src/
   index.css             tema: colori, caratteri e angoli (variabili di shadcn/ui)
   layouts/              AppLayout, AuthLayout, ErrorLayout
   components/ui/        componenti shadcn/ui, aggiunti con la CLI
+  components/reui/      componenti ReUI (aspetto di Metronic), aggiunti con la CLI: npx shadcn add @reui/<nome>
   components/common/    componenti del gestionale costruiti sui precedenti:
                           DataTable, FilterBar, PageHeader, EntityForm, MoneyInput,
                           QuantityInput, StatusBadge, FileUploader, PermissionGate

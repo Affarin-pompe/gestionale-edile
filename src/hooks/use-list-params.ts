@@ -4,8 +4,12 @@ import { useSearchParams } from 'react-router'
 const PAGE = 'pagina'
 const SORT = 'ordine'
 const SEARCH = 'cerca'
+const PER_PAGE = 'per_pagina'
 // The contract's limit for search: longer would be refused with a 422
 const MAX_SEARCH = 100
+/** The rows per page one can choose, and the contract's default. */
+export const PER_PAGE_OPTIONS = [10, 25, 50, 100] as const
+const DEFAULT_PER_PAGE = 25
 
 export interface ListOptions<TSort extends string, TFilter extends string> {
   /** The API's sort values, as in the contract (e.g. 'name', '-name'); the first is the default. */
@@ -29,6 +33,8 @@ export function useListParams<TSort extends string, TFilter extends string>(
   const sortParam = params.get(SORT)
   const sort = options.sorts.find((s) => s === sortParam) ?? defaultSort
   const search = (params.get(SEARCH) ?? '').slice(0, MAX_SEARCH)
+  const perPage =
+    PER_PAGE_OPTIONS.find((n) => String(n) === params.get(PER_PAGE)) ?? DEFAULT_PER_PAGE
   const filters = {} as Partial<Record<TFilter, string>>
   for (const name of Object.keys(options.filters) as TFilter[]) {
     const value = params.get(name)
@@ -53,10 +59,15 @@ export function useListParams<TSort extends string, TFilter extends string>(
 
   return {
     page,
+    perPage,
     sort,
     search,
     filters,
     setPage: (value: number) => update({ [PAGE]: value > 1 ? String(value) : undefined }),
+    setPerPage: (value: number) => {
+      const known = PER_PAGE_OPTIONS.find((n) => n === value)
+      if (known) update({ [PER_PAGE]: known === DEFAULT_PER_PAGE ? undefined : String(known) })
+    },
     setSort: (value: string) => {
       const known = options.sorts.find((s) => s === value)
       if (known) update({ [SORT]: known === defaultSort ? undefined : known })

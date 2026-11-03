@@ -18,6 +18,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar'
+import { Breadcrumbs } from './Breadcrumbs'
 import { CompanySwitcher } from './CompanySwitcher'
 import { UserMenu } from './UserMenu'
 
@@ -26,7 +27,7 @@ export function AppLayout() {
   return (
     <SidebarProvider>
       <Sidebar collapsible="icon">
-        <SidebarHeader>
+        <SidebarHeader className="h-17.5 justify-center">
           <CompanySwitcher />
         </SidebarHeader>
         <SidebarContent>
@@ -38,10 +39,12 @@ export function AppLayout() {
         <SidebarRail />
       </Sidebar>
       <SidebarInset>
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <header className="sticky top-0 z-10 flex h-15 shrink-0 items-center gap-3 bg-background px-4 md:h-17.5 lg:px-7.5">
           <SidebarTrigger className="-ml-1" />
+          {/* On a phone the page's own back link takes their place */}
+          <Breadcrumbs className="hidden md:block" />
         </header>
-        <div className="flex flex-1 flex-col gap-4 p-4">
+        <div className="flex flex-1 flex-col gap-5 px-4 pb-7.5 lg:px-7.5">
           <Outlet />
         </div>
       </SidebarInset>

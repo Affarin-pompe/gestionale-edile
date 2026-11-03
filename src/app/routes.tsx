@@ -9,6 +9,7 @@ import { AuthLayout } from '@/layouts/AuthLayout'
 import { HomePage } from './HomePage'
 import { LoadingScreen } from './LoadingScreen'
 import { PageError, RouteError } from './RouteError'
+import type { RouteHandle } from './route-handle'
 
 export function createRoutes(queryClient: QueryClient): RouteObject[] {
   return [
@@ -32,6 +33,7 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
               // Every other path lands here, so a wrong URL also needs a signed-in user
               path: ':azienda',
               middleware: [requireCompany],
+              handle: { crumb: 'menu.dashboard' } satisfies RouteHandle,
               Component: AppLayout,
               children: [
                 {
@@ -42,6 +44,7 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                     ...clientRoutes(queryClient),
                     {
                       path: '*',
+                      handle: { crumb: 'crumb.notFound' } satisfies RouteHandle,
                       loader: () => {
                         throw data(null, { status: 404 })
                       },

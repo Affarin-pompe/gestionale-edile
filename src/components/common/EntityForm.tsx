@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { useId, useState, type ReactNode } from 'react'
 import {
   FormProvider,
@@ -10,8 +11,10 @@ import { FormattedMessage, useIntl } from 'react-intl'
 import { Link } from 'react-router'
 import { ApiError, fieldErrors } from '@/api/errors'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldError,
   FieldGroup,
@@ -78,8 +81,8 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
 
   return (
     <FormProvider {...form}>
-      <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-6">
-        <p className="text-sm text-muted-foreground">
+      <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-5">
+        <p className="text-2sm text-muted-foreground">
           <FormattedMessage id="form.requiredNote" />
         </p>
         {children}
@@ -88,14 +91,14 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
             {problem}
           </p>
         )}
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" disabled={form.formState.isSubmitting}>
-            <FormattedMessage id={form.formState.isSubmitting ? 'form.saving' : 'form.save'} />
-          </Button>
+        <div className="flex flex-wrap justify-end gap-2.5">
           <Button asChild variant="outline">
             <Link to={cancelTo}>
               <FormattedMessage id="form.cancel" />
             </Link>
+          </Button>
+          <Button type="submit" disabled={form.formState.isSubmitting}>
+            <FormattedMessage id={form.formState.isSubmitting ? 'form.saving' : 'form.save'} />
           </Button>
         </div>
       </form>
@@ -103,17 +106,23 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
   )
 }
 
-/** A group of fields with a title; two columns on wide screens. */
+/** A group of fields in a card, with its title in the card's header. */
 export function FormSection({ legend, children }: { legend: MessageId; children: ReactNode }) {
   return (
-    <FieldSet>
-      <FieldLegend>
-        <FormattedMessage id={legend} />
-      </FieldLegend>
-      <FieldGroup className="grid gap-4 md:grid-cols-2">{children}</FieldGroup>
-    </FieldSet>
+    <Card>
+      <FieldSet className="gap-0">
+        <FieldLegend className="mb-0 flex min-h-14 w-full items-center border-b px-5 font-semibold">
+          <FormattedMessage id={legend} />
+        </FieldLegend>
+        <FieldGroup className="gap-5 p-5">{children}</FieldGroup>
+      </FieldSet>
+    </Card>
   )
 }
+
+// As in Metronic: where the card is wide enough, the label on the left and the field on the right
+const ROW = '@md/field-group:flex-row @md/field-group:items-baseline @md/field-group:gap-2.5'
+const ROW_LABEL = '@md/field-group:w-48 @md/field-group:shrink-0'
 
 interface FieldProps<TValues extends FieldValues> {
   name: Path<TValues>
@@ -149,7 +158,7 @@ function useFieldParts<TValues extends FieldValues>({
       'aria-describedby': describedBy || undefined,
     },
     label: (
-      <FieldLabel htmlFor={id}>
+      <FieldLabel htmlFor={id} className={ROW_LABEL}>
         <FormattedMessage id={label} />
         {required && <span aria-hidden="true">*</span>}
       </FieldLabel>
@@ -183,20 +192,22 @@ export function TextField<TValues extends FieldValues>({
   const parts = useFieldParts(props)
   const field = parts.register(props.name)
   return (
-    <Field data-invalid={parts.invalid} className={props.className}>
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
       {parts.label}
-      {multiline ? (
-        <Textarea {...parts.control} {...field} maxLength={maxLength} />
-      ) : (
-        <Input
-          {...parts.control}
-          {...field}
-          type={type}
-          maxLength={maxLength}
-          autoComplete={autoComplete}
-        />
-      )}
-      {parts.after}
+      <FieldContent className="min-w-0 gap-1.5">
+        {multiline ? (
+          <Textarea {...parts.control} {...field} maxLength={maxLength} />
+        ) : (
+          <Input
+            {...parts.control}
+            {...field}
+            type={type}
+            maxLength={maxLength}
+            autoComplete={autoComplete}
+          />
+        )}
+        {parts.after}
+      </FieldContent>
     </Field>
   )
 }
@@ -213,16 +224,22 @@ export function SelectField<TValues extends FieldValues>({
   const intl = useIntl()
   const parts = useFieldParts(props)
   return (
-    <Field data-invalid={parts.invalid} className={props.className}>
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
       {parts.label}
-      <NativeSelect {...parts.control} {...parts.register(props.name, { deps })}>
-        {options.map((option) => (
-          <NativeSelectOption key={option.value} value={option.value}>
-            {intl.formatMessage({ id: option.label })}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-      {parts.after}
+      <FieldContent className="min-w-0 gap-1.5">
+        <NativeSelect
+          className="w-full"
+          {...parts.control}
+          {...parts.register(props.name, { deps })}
+        >
+          {options.map((option) => (
+            <NativeSelectOption key={option.value} value={option.value}>
+              {intl.formatMessage({ id: option.label })}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        {parts.after}
+      </FieldContent>
     </Field>
   )
 }
