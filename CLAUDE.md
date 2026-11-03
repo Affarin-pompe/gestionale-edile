@@ -8,7 +8,7 @@ Frontend React di un gestionale per imprese edili (cantieri, rapportini, scadenz
 
 ## Stack
 - **Runtime:** Node LTS, solo per sviluppo e build. In produzione sono file statici.
-- **Framework:** Vite, React 19, TypeScript, shadcn/ui (Radix + Tailwind 4), React Router 7, TanStack Query e Table, React Hook Form + Zod
+- **Framework:** Vite, React 19, TypeScript, shadcn/ui (Radix + Tailwind 4), React Router 8 (modalità data), TanStack Query e Table, React Hook Form + Zod
 - **Backend:** in un altro repository. Il contratto è un file OpenAPI.
 - **Deploy:** da decidere; stesso dominio delle API.
 
@@ -42,10 +42,11 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
   - 401 riporta al login;
   - 403 mostra un messaggio senza cambiare pagina;
   - 404 apre la pagina "non trovato o non accessibile".
+  - I controlli prima delle pagine sono middleware di React Router in `src/auth/session.ts`: `requireAuth` (sessione) e `requireCompany` (azienda nell'URL). Le pagine leggono l'utente con `useMe()` e l'azienda con `useCompany()`.
   - Le chiamate passano da `api` (`src/api/client.ts`), che aggiunge il token CSRF e gestisce il 401. `unwrap` trasforma le risposte non 2xx in `ApiError`, e `fieldErrors` estrae i messaggi del 422 per ogni campo (`src/api/errors.ts`).
 - Dipendenze a versione esatta (`.npmrc`) e uscite da almeno 7 giorni, come fa Dependabot. Per aggiungerne una: `npm install <pacchetto>@<versione>`, scegliendo una versione con almeno 7 giorni. Per rigenerare il lockfile: `npm install --before=<data di 7 giorni fa>`.
 - Il contratto si cambia prima in `api/openapi.yaml`, poi si lancia `npm run api:types` e si committano entrambi. La CI fallisce se i tipi non sono aggiornati.
-- Ogni operazione nuova del contratto ha la sua risposta finta in `src/mocks/handlers.ts`, con gli stessi controlli del backend: sessione, CSRF, azienda e permessi. I test girano contro MSW e usano `createTestApi` (`src/test/api.ts`), che gestisce i cookie come un browser.
+- Ogni operazione nuova del contratto ha la sua risposta finta in `src/mocks/handlers.ts`, con gli stessi controlli del backend: sessione, CSRF, azienda e permessi. I test girano contro MSW e usano `createTestApi` (`src/test/api.ts`), che gestisce i cookie come un browser. I test delle pagine girano in jsdom (`// @vitest-environment jsdom`) con `setupAppTests` e `renderApp` (`src/test/app.ts`), che montano l'app intera su un router in memoria.
 - Componenti shadcn/ui: `npx shadcn add <nome>`, che usa la versione della CLI fissata nel progetto. Si aggiungono solo quando servono, e dopo si lancia `npm run format`.
 - `main` è protetto: si lavora solo con branch corti e pull request, con merge "squash". Il titolo della PR segue i Conventional Commits (`feat:`, `fix:`, `docs:`…) e lo controlla la CI.
 
@@ -55,7 +56,8 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
 - `.claude/commands/` e `.claude/standards/` sono installati in locale e non versionati. Non vanno aggiunti a git.
 - openapi-typescript 7.13 dichiara di supportare solo TypeScript 5. La regola `overrides` in `package.json` gli fa usare il nostro TypeScript 6: va tolta quando esce una versione che lo supporta.
 - MSW non deve mai finire nella build di produzione: si carica solo dentro `import.meta.env.DEV`, e la CI controlla che `dist/` non contenga né MSW né i dati finti.
-- MSW è alla versione 3: `http` si importa da `msw/http`, e l'opzione per le richieste senza risposta si chiama `onUnhandledFrame` (non più `onUnhandledRequest`). In Node i cookie non restano fra una richiesta e l'altra: li gestisce `createTestApi`.
+- MSW è alla versione 3: `http` si importa da `msw/http`, e l'opzione per le richieste senza risposta si chiama `onUnhandledFrame` (non più `onUnhandledRequest`). In Node i cookie non restano fra una richiesta e l'altra: li gestisce `createTestApi`. Sotto jsdom MSW non scrive nemmeno in `document.cookie`.
+- React Router 8: `RouterProvider` si importa da `react-router/dom`, tutto il resto da `react-router`. Il pacchetto `react-router-dom` non esiste più.
 - La cartella `interno/` è un altro repository, privato, ignorato da questo. Il suo contenuto non va mai copiato qui.
 
 ## Vincoli non negoziabili
