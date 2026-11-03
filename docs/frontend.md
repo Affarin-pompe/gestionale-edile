@@ -20,7 +20,7 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 | Carattere | Geist, con i file dentro il progetto (@fontsource) | Niente Google Fonts: la CSP può restare limitata al proprio dominio |
 | Routing | **React Router 8**, modalità "data" (senza il framework) | Route annidate: layout, azienda nell'URL, schede del cantiere. I controlli di accesso e di azienda girano prima che la pagina si apra. La 8 è la versione attuale; il piano iniziale diceva 7 |
 | Dati dal server | **TanStack Query** | Cache, stati di caricamento, aggiornamento dopo le modifiche |
-| Tabelle | **TanStack Table** | Paginazione, ordinamento e filtri lato server. È anche la base della tabella di shadcn/ui |
+| Tabelle | **TanStack Table 9** | Paginazione, ordinamento e filtri lato server. È anche la base della tabella di shadcn/ui. La 9 ha un'API diversa dalla 8, usata negli esempi di shadcn/ui |
 | Form | **React Hook Form + Zod** | Validazione immediata; gli errori del server finiscono sui campi. Sono gli stessi dei form di shadcn/ui |
 | Client API | **openapi-typescript + openapi-fetch** | Tipi generati dal contratto con il backend: se il backend cambia un campo, il frontend non compila finché non si allinea |
 | Sviluppo senza backend | **MSW** (Mock Service Worker) | Risposte finte basate sul contratto, così frontend e backend procedono in parallelo. Le stesse risposte servono ai test. Il plugin per Vite serve il worker solo in sviluppo |
@@ -111,6 +111,16 @@ Tutte le pagine del gestionale sono una di queste cinque. Si costruiscono una vo
 | **D. Dashboard** | Indicatori, grafici, elenchi "in scadenza" e "cantieri sopra budget" | Dashboard azienda, panoramica cantiere | Blocco Dashboard e componenti Chart |
 | **E. Telefono** | Una colonna, campi grandi, foto dalla fotocamera, bozza salvata in automatico | Rapportino di oggi | Nessuno: da progettare |
 
+### Elenchi
+
+Il primo esempio è l'elenco Clienti (`src/features/clients/`).
+
+- **Stato nell'URL.** Pagina, ordinamento, ricerca e filtri stanno nell'indirizzo (`?pagina=2&ordine=-created_at&cerca=rossi&tipo=company`), così un elenco filtrato si salva nei preferiti e si condivide. Se ne occupa `useListParams`. I valori che il backend rifiuterebbe tornano al predefinito. Cambiare ordinamento, ricerca o un filtro riporta alla prima pagina.
+- **Lavoro del backend.** `DataTable` mostra una pagina già filtrata, ordinata e paginata dal backend. Una colonna è ordinabile solo se il suo id è un valore di `sort` del contratto.
+- **Stati.** `DataTable` gestisce caricamento, elenco vuoto, errore e paginazione. Per l'errore mostra "Riprova"; per il 403 solo il messaggio. Mentre arriva un'altra pagina resta visibile quella di prima, attenuata.
+- **Ricerca.** `SearchFilter` applica il testo dopo una breve pausa nella digitazione e non aggiunge una voce alla cronologia per ogni lettera.
+- **Telefono.** Ogni riga diventa una scheda (`renderCard`). Non c'è ancora un comando per cambiare l'ordinamento.
+
 ## Struttura del codice
 
 ```
@@ -123,7 +133,7 @@ src/
                           DataTable, FilterBar, PageHeader, EntityForm, MoneyInput,
                           QuantityInput, StatusBadge, FileUploader, PermissionGate
   features/             un modulo per area, sempre con la stessa forma:
-    sites/                api.ts (query e modifiche)  routes.tsx  schemas.ts
+    sites/                api.ts (query e modifiche)  routes.ts  schemas.ts
                           pages/  components/
     daily-reports/
     clients/  suppliers/  employees/  equipment/
