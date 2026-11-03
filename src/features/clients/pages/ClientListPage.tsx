@@ -1,20 +1,29 @@
 import { useQuery } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl'
+import { Link } from 'react-router'
 import { useCompany } from '@/auth/me'
 import { DataTable } from '@/components/common/DataTable'
 import { FilterBar, SearchFilter } from '@/components/common/FilterBar'
 import { listColumnHelper } from '@/components/common/list-table'
 import { PageHeader } from '@/components/common/PageHeader'
+import { PermissionGate } from '@/components/common/PermissionGate'
+import { Button } from '@/components/ui/button'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { useListParams } from '@/hooks/use-list-params'
 import { CLIENT_KINDS, CLIENT_SORTS, clientListQuery, type Client, type ClientKind } from '../api'
 import { ClientCard } from '../components/ClientCard'
+import { ClientLink } from '../components/ClientLink'
+import { clientPaths } from '../paths'
 
 const KIND = 'tipo'
 const column = listColumnHelper<Client>()
 // Sortable columns have the id of a sort value of the API
 const columns = column.columns([
-  column.accessor('name', { header: () => <FormattedMessage id="clients.name" /> }),
+  column.accessor('name', {
+    header: () => <FormattedMessage id="clients.name" />,
+    cell: ({ row }) => <ClientLink client={row.original} />,
+  }),
   column.accessor('kind', {
     header: () => <FormattedMessage id="clients.kind" />,
     cell: (info) => <FormattedMessage id={`clients.kind.${info.getValue()}`} />,
@@ -56,7 +65,19 @@ export function ClientListPage() {
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <PageHeader title="clients.title" />
+      <PageHeader
+        title={<FormattedMessage id="clients.title" />}
+        actions={
+          <PermissionGate permission="clients.create">
+            <Button asChild>
+              <Link to={clientPaths(company.slug).new}>
+                <Plus aria-hidden="true" />
+                <FormattedMessage id="clients.new" />
+              </Link>
+            </Button>
+          </PermissionGate>
+        }
+      />
       <FilterBar>
         <SearchFilter label="clients.search" value={list.search} onChange={list.setSearch} />
         <NativeSelect

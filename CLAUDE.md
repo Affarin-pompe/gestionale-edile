@@ -28,7 +28,7 @@ npm run build
 Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build devono passare. Sono gli stessi controlli della CI (`.github/workflows/ci.yml`).
 
 ## Architettura in 5 righe
-- `src/features/<modulo>/`: un modulo per area, sempre con `api.ts`, `routes.ts`, `schemas.ts`, `pages/`, `components/`. `routes.ts` contiene solo oggetti di route (`Component: Pagina`, senza JSX): così l'aggiornamento a caldo delle pagine continua a funzionare.
+- `src/features/<modulo>/`: un modulo per area, sempre con `api.ts`, `routes.ts`, `schemas.ts`, `paths.ts`, `pages/`, `components/`. `routes.ts` contiene solo oggetti di route (`Component: Pagina`, senza JSX): così l'aggiornamento a caldo delle pagine continua a funzionare. Se i loader devono caricare dati, è una funzione che riceve il `queryClient` (esempio: `clientRoutes`). `paths.ts` costruisce gli URL assoluti delle pagine del modulo.
 - `src/components/ui/` contiene i componenti shadcn/ui; `src/components/common/` quelli del gestionale costruiti sopra.
 - `api/openapi.yaml` è il contratto con il backend. `src/api/schema.d.ts` è generato da lì: non si scrive a mano. `src/mocks/` contiene le risposte finte (MSW).
 - L'azienda è sempre nell'URL (`/:azienda/...`) e nel percorso delle API.
@@ -50,6 +50,7 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
 - Componenti shadcn/ui: `npx shadcn add <nome>`, che usa la versione della CLI fissata nel progetto. Si aggiungono solo quando servono, e dopo si lancia `npm run format`. Se la CLI chiede di sovrascrivere un componente già presente, si risponde di no. Gli eventuali testi in inglese dei componenti copiati si spostano in `src/i18n/it.ts` (id `ui.*`).
 - Le pagine dentro un'azienda sono figlie di `AppLayout` (`src/layouts/`). Il menu laterale è `src/app/menu.ts`: un modulo nuovo è una voce in più, con il permesso che la mostra. Per i permessi si usano `useCan`, `PermissionGate` e, sulle route, `loader: requirePermission('…')`. Va usato come loader, non come middleware, anche se TypeScript accetterebbe entrambi.
 - Gli elenchi usano `useListParams` (`src/hooks/`) e `PageHeader`, `FilterBar`, `DataTable` (`src/components/common/`). Pagina, ordinamento, ricerca e filtri stanno nell'URL, in italiano (`pagina`, `ordine`, `cerca`, un parametro per filtro). Ordinamento e paginazione li fa il backend. Una colonna è ordinabile solo se il suo id è un valore di `sort` del contratto; le altre hanno `enableSorting: false`. Esempio completo: `src/features/clients/`.
+- I form usano `EntityForm`, `FormSection`, `TextField` e `SelectField` (`src/components/common/EntityForm.tsx`), con lo schema Zod del modulo in `schemas.ts`. I messaggi dello schema sono id di `src/i18n/it.ts`, mai testi. `EntityForm` mette sotto i campi gli errori 422 e mostra sopra i pulsanti il 403 e gli altri errori. Dopo un salvataggio: avviso con `toast` di sonner, poi la scheda. Scheda e modifica caricano il record nel loader, così un 404 dell'API apre la pagina "non trovato".
 - `main` è protetto: si lavora solo con branch corti e pull request, con merge "squash". Il titolo della PR segue i Conventional Commits (`feat:`, `fix:`, `docs:`…) e lo controlla la CI.
 
 ## Trappole
