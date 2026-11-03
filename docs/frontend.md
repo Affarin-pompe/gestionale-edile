@@ -18,7 +18,7 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 | Componenti | **shadcn/ui** (Radix + Tailwind 4), stile "nova" | Il codice sta nel progetto e ha licenza MIT: si modifica liberamente e può stare in un repository pubblico. Lo stile "nova" è la variante compatta, adatta a tabelle e form fitti |
 | Supporto ai componenti | radix-ui, class-variance-authority, cn, tw-animate-css | Quelli che shadcn/ui richiede: componenti accessibili, varianti, unione delle classi, animazioni |
 | Carattere | Geist, con i file dentro il progetto (@fontsource) | Niente Google Fonts: la CSP può restare limitata al proprio dominio |
-| Routing | **React Router 7** | Route annidate: layout, azienda nell'URL, schede del cantiere |
+| Routing | **React Router 8**, modalità "data" (senza il framework) | Route annidate: layout, azienda nell'URL, schede del cantiere. I controlli di accesso e di azienda girano prima che la pagina si apra. La 8 è la versione attuale; il piano iniziale diceva 7 |
 | Dati dal server | **TanStack Query** | Cache, stati di caricamento, aggiornamento dopo le modifiche |
 | Tabelle | **TanStack Table** | Paginazione, ordinamento e filtri lato server. È anche la base della tabella di shadcn/ui |
 | Form | **React Hook Form + Zod** | Validazione immediata; gli errori del server finiscono sui campi. Sono gli stessi dei form di shadcn/ui |
@@ -32,7 +32,7 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 | Mappe | react-leaflet + OpenStreetMap | Posizione dei cantieri |
 | Gantt (fase 2) | SVAR React Gantt | Open source |
 | App installabile | vite-plugin-pwa | Icona sul telefono per i capi cantiere |
-| Test | Vitest + Testing Library, Playwright | Vedi la sezione Test |
+| Test | Vitest + Testing Library (con jsdom), Playwright | Vedi la sezione Test. jsdom simula il browser per i test delle pagine |
 
 **Punto di partenza:** il progetto si crea con Vite e la CLI di shadcn/ui; i componenti si aggiungono uno alla volta, quando servono. I blocchi già pronti di shadcn/ui (barra laterale, pagina di accesso, dashboard) sono la base dei layout **[da verificare: quali blocchi]**. Il tema (colori, caratteri, angoli) sta in un solo file CSS con le variabili di shadcn/ui: i colori dell'azienda si cambiano lì.
 
@@ -45,6 +45,12 @@ Ogni libreria ha il suo motivo nella colonna "Perché". Se il motivo cade, la li
 | Pagine di errore (404, 500) | **ErrorLayout** | Da costruire: una pagina semplice |
 
 I layout sono route padre di React Router: le pagine dei moduli si inseriscono come route figlie.
+
+### Accesso e sessione
+- Prima di ogni pagina protetta un middleware carica `/api/me`. Senza sessione si va su `/accedi?da=<pagina>`, e dopo l'accesso si torna lì. Il parametro `da` è accettato solo se punta a una pagina dell'app, mai a un altro sito.
+- Se l'utente non fa parte dell'azienda nell'URL vede la pagina "non trovato o non accessibile", come per i dati di un'altra azienda. Anche un indirizzo sbagliato richiede prima l'accesso, così non rivela nulla a chi non è collegato.
+- Un `401` arrivato a pagina aperta riporta all'accesso.
+- Entrando nelle pagine di accesso si svuota la cache delle risposte: dopo l'uscita, nemmeno il tasto "indietro" mostra i dati dell'utente precedente.
 
 ## Mappa delle schermate
 
@@ -109,7 +115,7 @@ Tutte le pagine del gestionale sono una di queste cinque. Si costruiscono una vo
 
 ```
 src/
-  app/                  App.tsx, provider (Query, Auth, Intl), routing principale, menu.ts
+  app/                  App.tsx (provider di Query e Intl), routes.tsx, pagine di errore, menu.ts
   index.css             tema: colori, caratteri e angoli (variabili di shadcn/ui)
   layouts/              AppLayout, AuthLayout, ErrorLayout
   components/ui/        componenti shadcn/ui, aggiunti con la CLI
@@ -123,7 +129,7 @@ src/
     clients/  suppliers/  employees/  equipment/
     documents/  costs/  dashboard/  settings/
   api/                  schema.d.ts generato dal contratto + client (autenticazione, azienda, errori)
-  auth/                 AuthProvider, RequireAuth, hook dei permessi
+  auth/                 utente collegato (/api/me), accesso e uscita, controlli prima delle pagine, hook dei permessi
   i18n/                 testi in italiano
   lib/                  formattazione di importi, quantità e date
   mocks/                risposte finte per sviluppare senza backend (dati di prova in data.ts)
