@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, screen, waitFor } from '@testing-library/react'
+import type { UserEvent } from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it } from 'vitest'
 import { messages } from '@/i18n/it'
@@ -14,9 +15,14 @@ const NUOVO = 'nuovo@example.test'
 const TITOLARE_GREETING = 'Ciao, Giulia Rossi'
 
 const findHeading = (name: string) => screen.findByRole('heading', { name })
-const logoutButton = () => screen.getByRole('button', { name: messages['logout.submit'] })
 
-describe('logout', () => {
+/** Inside a company, logout is the last item of the menu under the user's name. */
+async function logOutFromUserMenu(user: UserEvent) {
+  await user.click(screen.getByRole('button', { name: /Giulia Rossi/ }))
+  await user.click(await screen.findByRole('menuitem', { name: messages['logout.submit'] }))
+}
+
+describe('logout from the user menu', () => {
   it('ends on the login page with nothing cached, and the previous user does not come back', async () => {
     await signIn(TITOLARE)
     const { router, queryClient, user } = renderApp('/impresa-rossi', {
@@ -25,7 +31,7 @@ describe('logout', () => {
     await findHeading(TITOLARE_GREETING)
     expect(queryClient.getQueryCache().getAll()).not.toHaveLength(0)
 
-    await user.click(logoutButton())
+    await logOutFromUserMenu(user)
 
     await findHeading(messages['login.title'])
     expect(router.state.location.pathname).toBe('/accedi')
@@ -46,7 +52,7 @@ describe('logout', () => {
     await findHeading(TITOLARE_GREETING)
 
     deleteCookie('session')
-    await user.click(logoutButton())
+    await logOutFromUserMenu(user)
 
     await findHeading(messages['login.title'])
     expect(router.state.location.pathname).toBe('/accedi')
@@ -64,12 +70,32 @@ describe('logout', () => {
     const { router, user } = renderApp('/impresa-rossi', { expireSessionOn401: true })
     await findHeading(TITOLARE_GREETING)
 
-    await user.click(logoutButton())
+    await logOutFromUserMenu(user)
 
     await findHeading(messages['error.generic.title'])
     expect(screen.getByRole('button', { name: messages['error.reload'] })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: messages['login.title'] })).toBeNull()
     expect(router.state.location.pathname).not.toBe('/accedi')
+  })
+})
+
+describe('logout button of the "no company" page', () => {
+  it('ends on the login page, and the session is over', async () => {
+    await signIn(NUOVO)
+    const { router, user } = renderApp('/')
+    await findHeading(messages['noCompany.title'])
+
+    await user.click(screen.getByRole('button', { name: messages['logout.submit'] }))
+
+    await findHeading(messages['login.title'])
+    expect(router.state.location.pathname).toBe('/accedi')
+    expect(router.state.location.search).toBe('')
+    expect(countRequests('POST', '/api/auth/logout')).toBe(1)
+
+    await act(() => router.navigate('/'))
+    await waitFor(() => expect(router.state.navigation.state).toBe('idle'))
+    expect(router.state.location.pathname).toBe('/accedi')
+    expect(screen.queryByRole('heading', { name: messages['noCompany.title'] })).toBeNull()
   })
 })
 
