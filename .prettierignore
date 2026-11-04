@@ -1,5 +1,7 @@
 package-lock.json
 dist
 coverage
+# Generated from api/openapi.yaml by npm run api:types
+src/api/schema.d.ts
 # Docs are hand-written prose and tables: leave their layout alone
 *.md

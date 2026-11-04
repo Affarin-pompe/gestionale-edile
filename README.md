@@ -24,6 +24,7 @@ Gli altri comandi:
 | `npm run typecheck` | Controllo dei tipi TypeScript |
 | `npm test` | Test con Vitest (`test:watch` li rilancia a ogni modifica) |
 | `npm run build` | Build di produzione in `dist/` |
+| `npm run api:types` | Rigenera i tipi TypeScript dal contratto `api/openapi.yaml` |
 
 Gli stessi controlli girano su GitHub a ogni pull request. Il titolo della PR deve seguire i Conventional Commits (es. `feat(clienti): elenco con filtri`), perché diventa il commit su `main`.
 
@@ -41,4 +42,4 @@ Tutto ciò che il frontend legge da `import.meta.env` finisce nel browser ed è 
 - **Il repository è pubblico.** Niente template ThemeForest, né altro materiale con una licenza che ne vieti la pubblicazione ([ADR-0001](docs/adr/0001-template-ui-e-repository-pubblico.md)). Niente segreti, né nomi di sistemi interni.
 - **L'interfaccia nasconde, il backend blocca.** Ogni permesso va controllato anche lato server.
 - **Importi e quantità arrivano come stringhe.** Non si calcolano con i numeri decimali di JavaScript.
-- **Il contratto API si cambia prima nel file OpenAPI**, poi nel codice.
+- **Il contratto API si cambia prima nel file OpenAPI** (`api/openapi.yaml`), poi nel codice.

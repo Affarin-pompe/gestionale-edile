@@ -28,6 +28,10 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - name: API types match the contract
+        run: |
+          npm run api:types
+          git diff --exit-code -- src/api/schema.d.ts \n            || { echo '::error::src/api/schema.d.ts is out of date: run npm run api:types'; exit 1; }
       - run: npm run lint
       - run: npm run format:check
       - run: npm run typecheck

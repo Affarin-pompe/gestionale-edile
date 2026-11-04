@@ -20,6 +20,7 @@ npm run dev
 npm run lint            # ESLint con regole type-aware
 npm run format:check    # Prettier (npm run format per correggere); i .md sono esclusi
 npm run typecheck
+npm run api:types       # rigenera src/api/schema.d.ts da api/openapi.yaml
 npm test
 npm run build
 ```
@@ -29,7 +30,7 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
 ## Architettura in 5 righe
 - `src/features/<modulo>/`: un modulo per area, sempre con `api.ts`, `routes.tsx`, `schemas.ts`, `pages/`, `components/`.
 - `src/components/ui/` contiene i componenti shadcn/ui; `src/components/common/` quelli del gestionale costruiti sopra.
-- `src/api/` ha i tipi generati dal contratto: non si scrivono a mano. `src/mocks/` contiene le risposte finte (MSW).
+- `api/openapi.yaml` è il contratto con il backend. `src/api/schema.d.ts` è generato da lì: non si scrive a mano. `src/mocks/` contiene le risposte finte (MSW).
 - L'azienda è sempre nell'URL (`/:azienda/...`) e nel percorso delle API.
 - Il dettaglio è in `docs/frontend.md`; le decisioni sono in `docs/adr/`.
 
@@ -42,6 +43,7 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
   - 403 mostra un messaggio senza cambiare pagina;
   - 404 apre la pagina "non trovato o non accessibile".
 - Dipendenze a versione esatta (`.npmrc`) e uscite da almeno 7 giorni, come fa Dependabot. Per aggiungerne una: `npm install <pacchetto>@<versione>`, scegliendo una versione con almeno 7 giorni. Per rigenerare il lockfile: `npm install --before=<data di 7 giorni fa>`.
+- Il contratto si cambia prima in `api/openapi.yaml`, poi si lancia `npm run api:types` e si committano entrambi. La CI fallisce se i tipi non sono aggiornati.
 - Componenti shadcn/ui: `npx shadcn add <nome>`, che usa la versione della CLI fissata nel progetto. Si aggiungono solo quando servono, e dopo si lancia `npm run format`.
 - `main` è protetto: si lavora solo con branch corti e pull request, con merge "squash". Il titolo della PR segue i Conventional Commits (`feat:`, `fix:`, `docs:`…) e lo controlla la CI.
 
@@ -49,6 +51,7 @@ Prima di dichiarare finito un lavoro: lint, formattazione, tipi, test e build de
 - **Il repository è pubblico.** Non vanno committati template ThemeForest, segreti, nomi di sistemi o di progetti interni.
 - `import.meta.env` finisce nel browser: è pubblico.
 - `.claude/commands/` e `.claude/standards/` sono installati in locale e non versionati. Non vanno aggiunti a git.
+- openapi-typescript 7.13 dichiara di supportare solo TypeScript 5. La regola `overrides` in `package.json` gli fa usare il nostro TypeScript 6: va tolta quando esce una versione che lo supporta.
 - La cartella `interno/` è un altro repository, privato, ignorato da questo. Il suo contenuto non va mai copiato qui.
 
 ## Vincoli non negoziabili

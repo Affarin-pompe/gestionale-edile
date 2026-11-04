@@ -7,8 +7,9 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default defineConfig([
-  // interno/ and .claude/ are local-only folders, ignored by git as well
-  globalIgnores(['dist', 'coverage', 'interno', '.claude']),
+  // interno/ and .claude/ are local-only folders, ignored by git as well;
+  // schema.d.ts is generated from the API contract
+  globalIgnores(['dist', 'coverage', 'interno', '.claude', 'src/api/schema.d.ts']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
