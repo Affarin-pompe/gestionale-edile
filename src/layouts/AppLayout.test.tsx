@@ -66,17 +66,21 @@ function menuGroups(root: ParentNode = document) {
 }
 /** A planned module as the menu shows it: its name and "Presto". */
 const soon = (id: MessageId) => `${T[id]}${T['menu.soon']}`
-// Fornitori needs suppliers.view, which the mock users do not have
-const PLANNED_REGISTRY = [soon('menu.employees'), soon('menu.vehicles')]
-const menuWith = (registry: (string | null)[]) => [
-  [null, [DASHBOARD]],
-  [
-    T['menu.work'],
-    [soon('menu.quotes'), soon('menu.estimates'), soon('menu.sites'), soon('menu.reports')],
-  ],
-  [T['menu.admin'], [soon('menu.deadlines'), soon('menu.costs')]],
-  [REGISTRY, registry],
-]
+// Fornitori, Dipendenti and Mezzi need permissions the mock users do not have
+const PLANNED_REGISTRY: string[] = []
+const menuWith = (registry: (string | null)[]) =>
+  (
+    [
+      [null, [DASHBOARD]],
+      [
+        T['menu.work'],
+        [soon('menu.quotes'), soon('menu.estimates'), soon('menu.sites'), soon('menu.reports')],
+      ],
+      [T['menu.admin'], [soon('menu.deadlines'), soon('menu.costs')]],
+      [REGISTRY, registry],
+      // A group with no item the user may see is not shown
+    ] as [string | null, (string | null)[]][]
+  ).filter(([, items]) => items.length > 0)
 /** The menu items that say "Presto". */
 const plannedItems = () =>
   Array.from(document.querySelectorAll('[data-sidebar="menu-item"]')).filter((item) =>
@@ -232,7 +236,7 @@ describe('side menu', () => {
     },
   )
 
-  it('without clients.view in the company, Anagrafiche has only the planned modules, no Clienti', async () => {
+  it('without clients.view in the company, Anagrafiche shows no Clienti', async () => {
     server.use(http.get('*/api/me', () => HttpResponse.json(withoutClientsView)))
     renderApp('/impresa-rossi')
     await findHeading('Ciao, Paola Verdi')
@@ -251,12 +255,12 @@ describe('side menu', () => {
     await waitFor(() => menuLink(DASHBOARD))
 
     const planned = plannedItems()
-    expect(planned).toHaveLength(8)
+    expect(planned).toHaveLength(6)
     for (const item of planned) {
       expect(within(item as HTMLElement).getByText(T['menu.soon'])).toBeTruthy()
       expect(item.querySelector('a, button, [href], [tabindex]')).toBeNull()
     }
-    for (const id of ['menu.quotes', 'menu.sites', 'menu.costs', 'menu.vehicles'] as const) {
+    for (const id of ['menu.quotes', 'menu.sites', 'menu.costs'] as const) {
       expect(screen.queryByRole('link', { name: new RegExp(T[id]) })).toBeNull()
     }
   })

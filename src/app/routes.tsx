@@ -5,7 +5,9 @@ import { NoCompanyPage } from '@/auth/NoCompanyPage'
 import { homeLoader, loginAction, logoutAction, requireAuth, requireCompany } from '@/auth/session'
 import { AppLayout } from '@/layouts/AppLayout'
 import { clientRoutes } from '@/features/clients/routes'
+import { employeeRoutes } from '@/features/employees/routes'
 import { supplierRoutes } from '@/features/suppliers/routes'
+import { vehicleRoutes } from '@/features/vehicles/routes'
 import { AuthLayout } from '@/layouts/AuthLayout'
 import { HomePage } from './HomePage'
 import { LoadingScreen } from './LoadingScreen'
@@ -44,6 +46,8 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                     { index: true, Component: HomePage },
                     ...clientRoutes(queryClient),
                     ...supplierRoutes(queryClient),
+                    ...employeeRoutes(queryClient),
+                    ...vehicleRoutes(queryClient),
                     {
                       path: '*',
                       handle: { crumb: 'crumb.notFound' } satisfies RouteHandle,

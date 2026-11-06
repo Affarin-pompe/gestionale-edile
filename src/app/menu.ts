@@ -66,8 +66,18 @@ export const menu: MenuGroup[] = [
         path: 'anagrafiche/fornitori',
         permission: 'suppliers.view',
       },
-      { label: 'menu.employees', icon: Contact, path: 'anagrafiche/dipendenti', soon: true },
-      { label: 'menu.vehicles', icon: Truck, path: 'anagrafiche/mezzi', soon: true },
+      {
+        label: 'menu.employees',
+        icon: Contact,
+        path: 'anagrafiche/dipendenti',
+        permission: 'employees.view',
+      },
+      {
+        label: 'menu.vehicles',
+        icon: Truck,
+        path: 'anagrafiche/mezzi',
+        permission: 'vehicles.view',
+      },
     ],
   },
 ]
