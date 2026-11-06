@@ -36,8 +36,11 @@ export function forgetLists() {
 export interface ListOptions<TSort extends string, TFilter extends string> {
   /** The API's sort values, as in the contract (e.g. 'name', '-name'); the first is the default. */
   sorts: readonly [TSort, ...TSort[]]
-  /** The allowed values of each filter, by URL parameter name. */
-  filters: Record<TFilter, readonly string[]>
+  /**
+   * The allowed values of each filter, by URL parameter name: a list, or a check for
+   * values that cannot be listed, such as dates.
+   */
+  filters: Record<TFilter, readonly string[] | ((value: string) => boolean)>
 }
 
 /**
@@ -67,7 +70,11 @@ export function useListParams<TSort extends string, TFilter extends string>(
   const filters = {} as Partial<Record<TFilter, string>>
   for (const name of Object.keys(options.filters) as TFilter[]) {
     const value = params.get(name)
-    if (value !== null && options.filters[name].includes(value)) filters[name] = value
+    const allowed = options.filters[name]
+    if (value === null) continue
+    if (typeof allowed === 'function' ? allowed(value) : allowed.includes(value)) {
+      filters[name] = value
+    }
   }
 
   /** Empty values leave the URL. Any change but the page goes back to the first page. */
@@ -104,5 +111,7 @@ export function useListParams<TSort extends string, TFilter extends string>(
     // Kept as typed (the API call trims it), and without one history entry per letter
     setSearch: (value: string) => update({ [SEARCH]: value.slice(0, MAX_SEARCH) }, true),
     setFilter: (name: TFilter, value: string | undefined) => update({ [name]: value }),
+    /** Several filters in one step, e.g. the two ends of a date range. */
+    setFilters: (changes: Partial<Record<TFilter, string | undefined>>) => update(changes),
   }
 }

@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { useId, useState, type ReactNode } from 'react'
+import { Fragment, useId, useState, type ReactNode } from 'react'
 import {
   FormProvider,
   useFormContext,
@@ -23,7 +23,11 @@ import {
   FieldSet,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import {
+  NativeSelect,
+  NativeSelectOptGroup,
+  NativeSelectOption,
+} from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import { listHref } from '@/hooks/use-list-params'
 import { isMessageId, type MessageId } from '@/i18n/it'
@@ -61,6 +65,8 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
   function showError(error: unknown) {
     if (!(error instanceof ApiError)) return intl.formatMessage({ id: 'form.failed' })
     if (error.status === 403) return intl.formatMessage({ id: 'form.forbidden' })
+    // Someone else saved the record after the user opened it: nothing was changed
+    if (error.status === 412) return intl.formatMessage({ id: 'form.stale' })
     if (error.status !== 422) return intl.formatMessage({ id: 'form.failed' })
 
     const errors = fieldErrors(error)
@@ -184,12 +190,15 @@ export function TextField<TValues extends FieldValues>({
   multiline = false,
   maxLength,
   autoComplete,
+  inputMode,
   ...props
 }: FieldProps<TValues> & {
-  type?: 'text' | 'email' | 'tel'
+  type?: 'text' | 'email' | 'tel' | 'date'
   multiline?: boolean
   maxLength?: number
   autoComplete?: string
+  /** The phone's keyboard, e.g. decimal for amounts. */
+  inputMode?: 'decimal' | 'numeric'
 }) {
   const parts = useFieldParts(props)
   const field = parts.register(props.name)
@@ -206,6 +215,8 @@ export function TextField<TValues extends FieldValues>({
             type={type}
             maxLength={maxLength}
             autoComplete={autoComplete}
+            inputMode={inputMode}
+            className={type === 'date' ? 'w-full sm:w-44' : undefined}
           />
         )}
         {parts.after}
@@ -240,6 +251,110 @@ export function SelectField<TValues extends FieldValues>({
             </NativeSelectOption>
           ))}
         </NativeSelect>
+        {parts.after}
+      </FieldContent>
+    </Field>
+  )
+}
+
+/** A select whose options come from data (e.g. the names of the suppliers), in groups. */
+export function OptionsField<TValues extends FieldValues>({
+  groups,
+  empty,
+  ...props
+}: FieldProps<TValues> & {
+  groups: readonly { label?: MessageId; options: readonly { value: string; text: string }[] }[]
+  /** The first option, for no choice: its value is ''. */
+  empty?: MessageId
+}) {
+  const intl = useIntl()
+  const parts = useFieldParts(props)
+  return (
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
+      {parts.label}
+      <FieldContent className="min-w-0 gap-1.5">
+        <NativeSelect className="w-full" {...parts.control} {...parts.register(props.name)}>
+          {empty && (
+            <NativeSelectOption value="">{intl.formatMessage({ id: empty })}</NativeSelectOption>
+          )}
+          {groups.map((group, index) => {
+            const options = group.options.map((option) => (
+              <NativeSelectOption key={option.value} value={option.value}>
+                {option.text}
+              </NativeSelectOption>
+            ))
+            return group.label ? (
+              <NativeSelectOptGroup
+                key={group.label}
+                label={intl.formatMessage({ id: group.label })}
+              >
+                {options}
+              </NativeSelectOptGroup>
+            ) : (
+              <Fragment key={index}>{options}</Fragment>
+            )
+          })}
+        </NativeSelect>
+        {parts.after}
+      </FieldContent>
+    </Field>
+  )
+}
+
+const CHECKBOX = 'size-4 shrink-0 accent-primary'
+
+/** A yes-or-no field, such as "Subappaltatore": the label on the left, the box on the right. */
+export function CheckboxField<TValues extends FieldValues>(props: FieldProps<TValues>) {
+  const parts = useFieldParts(props)
+  return (
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
+      {parts.label}
+      <FieldContent className="min-w-0 gap-1.5">
+        <input
+          type="checkbox"
+          className={CHECKBOX}
+          {...parts.control}
+          {...parts.register(props.name)}
+        />
+        {parts.after}
+      </FieldContent>
+    </Field>
+  )
+}
+
+/** Several choices out of a short list, each with its box; the value is the chosen ones. */
+export function CheckboxGroupField<TValues extends FieldValues>({
+  options,
+  ...props
+}: FieldProps<TValues> & { options: readonly { value: string; label: MessageId }[] }) {
+  const intl = useIntl()
+  const parts = useFieldParts(props)
+  const field = parts.register(props.name)
+  return (
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
+      <span className={cn('text-sm leading-snug font-medium', ROW_LABEL)} aria-hidden="true">
+        <FormattedMessage id={props.label} />
+      </span>
+      <FieldContent className="min-w-0 gap-1.5">
+        <div
+          role="group"
+          aria-label={intl.formatMessage({ id: props.label })}
+          aria-describedby={parts.control['aria-describedby']}
+          className="flex flex-col gap-2"
+        >
+          {options.map((option) => (
+            <label key={option.value} className="flex items-center gap-2.5 text-sm">
+              <input
+                type="checkbox"
+                className={CHECKBOX}
+                value={option.value}
+                aria-invalid={parts.control['aria-invalid']}
+                {...field}
+              />
+              <FormattedMessage id={option.label} />
+            </label>
+          ))}
+        </div>
         {parts.after}
       </FieldContent>
     </Field>

@@ -66,7 +66,8 @@ function menuGroups(root: ParentNode = document) {
 }
 /** A planned module as the menu shows it: its name and "Presto". */
 const soon = (id: MessageId) => `${T[id]}${T['menu.soon']}`
-const PLANNED_REGISTRY = [soon('menu.suppliers'), soon('menu.employees'), soon('menu.vehicles')]
+// Fornitori needs suppliers.view, which the mock users do not have
+const PLANNED_REGISTRY = [soon('menu.employees'), soon('menu.vehicles')]
 const menuWith = (registry: (string | null)[]) => [
   [null, [DASHBOARD]],
   [
@@ -250,7 +251,7 @@ describe('side menu', () => {
     await waitFor(() => menuLink(DASHBOARD))
 
     const planned = plannedItems()
-    expect(planned).toHaveLength(9)
+    expect(planned).toHaveLength(8)
     for (const item of planned) {
       expect(within(item as HTMLElement).getByText(T['menu.soon'])).toBeTruthy()
       expect(item.querySelector('a, button, [href], [tabindex]')).toBeNull()

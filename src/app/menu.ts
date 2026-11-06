@@ -60,7 +60,12 @@ export const menu: MenuGroup[] = [
         path: 'anagrafiche/clienti',
         permission: 'clients.view',
       },
-      { label: 'menu.suppliers', icon: Handshake, path: 'anagrafiche/fornitori', soon: true },
+      {
+        label: 'menu.suppliers',
+        icon: Handshake,
+        path: 'anagrafiche/fornitori',
+        permission: 'suppliers.view',
+      },
       { label: 'menu.employees', icon: Contact, path: 'anagrafiche/dipendenti', soon: true },
       { label: 'menu.vehicles', icon: Truck, path: 'anagrafiche/mezzi', soon: true },
     ],
