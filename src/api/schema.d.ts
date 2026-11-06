@@ -4,6 +4,28 @@
  */
 
 export interface paths {
+    "/api/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stato del servizio
+         * @description Per il bilanciatore, l'orchestratore dei container e i controlli di disponibilità.
+         *     Senza sessione e senza dati delle aziende. 200 se l'API raggiunge il database, 503
+         *     con code database_unavailable se non risponde entro 2 secondi.
+         */
+        get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/csrf": {
         parameters: {
             query?: never;
@@ -47,6 +69,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Password dimenticata, richiesta del link
+         * @description Serve il token CSRF (come per l'accesso). Se l'email è di un account attivo il backend
+         *     manda un messaggio con il link /password-dimenticata/{token}, valido un'ora e una volta
+         *     sola; al massimo 3 messaggi l'ora per account. La risposta è sempre 204, anche per
+         *     un'email sconosciuta: non rivela quali account esistono.
+         */
+        post: operations["requestPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/password-reset/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Password dimenticata, scelta della nuova password
+         * @description Serve il token CSRF. Con un link valido la password cambia, tutte le sessioni
+         *     dell'account si chiudono e gli altri link inviati smettono di funzionare; poi si
+         *     accede con la nuova password. Un link sconosciuto, già usato o scaduto risponde 404.
+         */
+        post: operations["resetPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/logout": {
         parameters: {
             query?: never;
@@ -76,8 +145,35 @@ export interface paths {
         };
         /** Utente collegato, con le sue aziende e i permessi in ognuna */
         get: operations["getMe"];
-        put?: never;
+        /**
+         * Cambio del proprio nome
+         * @description L'email non si cambia da qui.
+         */
+        put: operations["updateMe"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cambio della propria password
+         * @description Serve la password attuale: se è sbagliata la risposta è 422 sul campo
+         *     current_password e conta come tentativo di accesso fallito (dopo troppi, 429). La
+         *     nuova password ha almeno 10 caratteri. Le altre sessioni dell'utente vengono chiuse;
+         *     quella da cui arriva la richiesta resta aperta.
+         */
+        post: operations["changePassword"];
         delete?: never;
         options?: never;
         head?: never;
@@ -111,6 +207,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/clients/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei clienti in CSV
+         * @description Permesso: clients.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
+         *     paginazione (al massimo 10000 righe). Il file è per i fogli di calcolo in italiano:
+         *     UTF-8 con BOM, separatore punto e virgola, intestazioni in italiano. Le celle che
+         *     inizierebbero con = + - @ sono precedute da un apostrofo, perché il foglio di calcolo
+         *     non le esegua come formule. Il file si chiama clienti.csv.
+         */
+        get: operations["exportClients"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/clients/{client}": {
         parameters: {
             query?: never;
@@ -130,10 +253,2556 @@ export interface paths {
         /**
          * Modifica di un cliente
          * @description Permesso: clients.update. Si inviano tutti i campi, come in creazione.
+         *     If-Match porta l'ETag ricevuto con la scheda: se nel frattempo qualcuno ha modificato
+         *     il cliente, la risposta è 412 e niente viene sovrascritto.
          */
         put: operations["updateClient"];
         post?: never;
+        /**
+         * Eliminazione di un cliente
+         * @description Permesso: clients.delete. Si può eliminare solo un cliente senza documenti collegati
+         *     (preventivi, computi, scadenze): altrimenti la risposta è 409 con code has_documents e
+         *     il cliente va archiviato. If-Match come nella modifica.
+         */
+        delete: operations["deleteClient"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/clients/{client}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archiviazione di un cliente
+         * @description Permesso: clients.update. Il cliente sparisce dall'elenco predefinito ma resta
+         *     consultabile, con i documenti collegati. Archiviare un cliente già archiviato non cambia
+         *     la data di archiviazione. If-Match come nella modifica.
+         */
+        post: operations["archiveClient"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/clients/{client}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ripristino di un cliente archiviato
+         * @description Permesso: clients.update. Riporta il cliente tra quelli attivi. If-Match come nella modifica.
+         */
+        post: operations["restoreClient"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco dei fornitori e dei subappaltatori
+         * @description Permesso: suppliers.view
+         */
+        get: operations["listSuppliers"];
+        put?: never;
+        /**
+         * Nuovo fornitore
+         * @description Permesso: suppliers.create
+         */
+        post: operations["createSupplier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei fornitori in CSV
+         * @description Permesso: suppliers.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Le categorie sono in
+         *     una sola colonna, separate da virgole. Il file si chiama fornitori.csv.
+         */
+        get: operations["exportSuppliers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/{supplier}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Scheda di un fornitore
+         * @description Permesso: suppliers.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getSupplier"];
+        /**
+         * Modifica di un fornitore
+         * @description Permesso: suppliers.update. Si inviano tutti i campi, come in creazione. If-Match come
+         *     nella modifica dei clienti.
+         */
+        put: operations["updateSupplier"];
+        post?: never;
+        /**
+         * Eliminazione di un fornitore
+         * @description Permesso: suppliers.delete. Solo senza documenti collegati: altrimenti 409 con code
+         *     has_documents, e il fornitore va archiviato.
+         */
+        delete: operations["deleteSupplier"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/{supplier}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archiviazione di un fornitore
+         * @description Permesso: suppliers.update. Come per i clienti.
+         */
+        post: operations["archiveSupplier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/{supplier}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ripristino di un fornitore archiviato
+         * @description Permesso: suppliers.update. Come per i clienti.
+         */
+        post: operations["restoreSupplier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/{supplier}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Documenti di regolarità di un fornitore
+         * @description Permesso: suppliers.view. Tutti i documenti del fornitore, senza paginazione (sono
+         *     pochi), ordinati per scadenza: prima quelli che scadono prima, in fondo quelli senza.
+         */
+        get: operations["listSupplierDocuments"];
+        put?: never;
+        /**
+         * Nuovo documento di regolarità
+         * @description Permesso: suppliers.update
+         */
+        post: operations["createSupplierDocument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/{supplier}/documents/{document}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di un documento di regolarità
+         * @description Permesso: suppliers.update. Si inviano tutti i campi. If-Match come per i fornitori.
+         */
+        put: operations["updateSupplierDocument"];
+        post?: never;
+        /**
+         * Eliminazione di un documento di regolarità
+         * @description Permesso: suppliers.update. If-Match come per i fornitori.
+         */
+        delete: operations["deleteSupplierDocument"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/deadlines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco delle scadenze
+         * @description Permesso: deadlines.view. Per il calendario si chiede un intervallo con filter[from] e
+         *     filter[to] (compresi) e per_page=100.
+         */
+        get: operations["listDeadlines"];
+        put?: never;
+        /**
+         * Nuova scadenza
+         * @description Permesso: deadlines.create. Nasce aperta.
+         */
+        post: operations["createDeadline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/deadlines/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione delle scadenze in CSV
+         * @description Permesso: deadlines.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Date come 30/11/2026,
+         *     importi con la virgola decimale (1234,50). Il file si chiama scadenze.csv.
+         */
+        get: operations["exportDeadlines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/deadlines/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Riepilogo delle scadenze per la dashboard
+         * @description Permesso: deadlines.view. Solo scadenze aperte, contate sulla data di oggi in Italia.
+         *     overdue: scadute. next_7_days e next_30_days: da oggi compreso fino a 7 o 30 giorni
+         *     (la seconda comprende la prima).
+         */
+        get: operations["getDeadlineSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/deadlines/{deadline}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                deadline: components["parameters"]["DeadlineId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Una scadenza
+         * @description Permesso: deadlines.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getDeadline"];
+        /**
+         * Modifica di una scadenza
+         * @description Permesso: deadlines.update. Si inviano tutti i campi. Lo stato non cambia da qui:
+         *     si usano complete e reopen.
+         */
+        put: operations["updateDeadline"];
+        post?: never;
+        /**
+         * Eliminazione di una scadenza
+         * @description Permesso: deadlines.delete.
+         */
+        delete: operations["deleteDeadline"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/deadlines/{deadline}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                deadline: components["parameters"]["DeadlineId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scadenza fatta
+         * @description Permesso: deadlines.update. Imposta status done e done_at; se è già fatta non cambia
+         *     done_at. Se la scadenza è ricorrente crea la successiva (una volta sola, anche dopo una
+         *     riapertura) e ne restituisce l'id in next_deadline_id.
+         */
+        post: operations["completeDeadline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/deadlines/{deadline}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                deadline: components["parameters"]["DeadlineId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scadenza riaperta
+         * @description Permesso: deadlines.update. Riporta status a open e done_at a null. L'eventuale
+         *     scadenza successiva già creata resta.
+         */
+        post: operations["reopenDeadline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco dei cantieri
+         * @description Permesso: sites.view. La ricerca guarda nome, codice, indirizzo e cliente.
+         */
+        get: operations["listSites"];
+        put?: never;
+        /**
+         * Nuovo cantiere
+         * @description Permesso: sites.create. Il codice, se c'è, è unico nell'azienda.
+         */
+        post: operations["createSite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei cantieri in CSV
+         * @description Permesso: sites.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Stato tradotto (Da iniziare, In corso, Sospeso, Chiuso), date come 30/11/2026, budget con la virgola decimale.
+         *     Il file si chiama cantieri.csv.
+         */
+        get: operations["exportSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Scheda di un cantiere
+         * @description Permesso: sites.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getSite"];
+        /**
+         * Modifica di un cantiere
+         * @description Permesso: sites.update. Si inviano tutti i campi.
+         */
+        put: operations["updateSite"];
+        post?: never;
+        /**
+         * Eliminazione di un cantiere
+         * @description Permesso: sites.delete.
+         */
+        delete: operations["deleteSite"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/team": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Squadra del cantiere
+         * @description Permesso: sites.view. Senza permesso risponde 404, non 403. Solo nome, cognome,
+         *     mansione e stato dei dipendenti, senza costi: la vede anche chi non ha employees.view.
+         *     In ordine di cognome e nome.
+         */
+        get: operations["getSiteTeam"];
+        /**
+         * Modifica della squadra del cantiere
+         * @description Permesso: sites.update. Si invia l'elenco completo dei dipendenti, che sostituisce il
+         *     precedente (al massimo 200, i doppioni si tolgono). Senza If-Match: il valore è assoluto.
+         */
+        put: operations["replaceSiteTeam"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/daily-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco dei rapportini
+         * @description Permesso: reports.view. Senza le righe delle ore, con i totali. Ordine predefinito: dal
+         *     giorno più recente, poi per nome del cantiere.
+         */
+        get: operations["listDailyReports"];
+        put?: never;
+        /**
+         * Nuovo rapportino
+         * @description Permesso: reports.create. Nasce in bozza. Uno solo per cantiere e giorno (altrimenti
+         *     422 su date). Dipendenti e mezzi sono quelli dell'azienda, anche fuori dalla squadra.
+         */
+        post: operations["createDailyReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/daily-reports/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Rapportino del giorno di un cantiere, per il telefono
+         * @description Permesso: reports.view. Il rapportino del cantiere in quel giorno, se c'è; altrimenti
+         *     una proposta da inviare a createDailyReport, con la squadra del cantiere a 8 ore.
+         *     Senza date vale oggi, nel calendario italiano. Con i dipendenti e i mezzi attivi da
+         *     scegliere (solo nomi, niente costi), anche per chi non ha employees.view o vehicles.view.
+         */
+        get: operations["getTodayDailyReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/daily-reports/{report}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                report: components["parameters"]["DailyReportId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Un rapportino con le ore
+         * @description Permesso: reports.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getDailyReport"];
+        /**
+         * Modifica di un rapportino in bozza
+         * @description Permesso: reports.update. Si inviano tutti i campi; le righe delle ore sostituiscono le
+         *     precedenti. Solo in bozza: altrimenti 409 con code report_not_draft.
+         */
+        put: operations["updateDailyReport"];
+        post?: never;
+        /**
+         * Eliminazione di un rapportino in bozza
+         * @description Permesso: reports.delete. Solo in bozza: altrimenti 409 con code report_not_draft.
+         */
+        delete: operations["deleteDailyReport"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/daily-reports/{report}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                report: components["parameters"]["DailyReportId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invio, approvazione o ritorno in bozza di un rapportino
+         * @description Da draft a submitted (invio) con reports.update; da submitted ad approved e da
+         *     submitted o approved a draft (ritorno in bozza per correggere) con reports.approve.
+         *     Gli altri passaggi rispondono 409 con code invalid_transition.
+         */
+        post: operations["changeDailyReportStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco dei costi inseriti a mano
+         * @description Permesso: costs.view. Materiali, noli, subappalti e altri costi dei cantieri, dal più
+         *     recente. total_amount è la somma di tutti i costi che rispettano i filtri, non solo
+         *     della pagina. Manodopera e mezzi dei rapportini non sono qui.
+         */
+        get: operations["listSiteCosts"];
+        put?: never;
+        /**
+         * Nuovo costo di un cantiere
+         * @description Permesso: costs.create.
+         */
+        post: operations["createSiteCost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/costs/{cost}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                cost: components["parameters"]["SiteCostId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Un costo
+         * @description Permesso: costs.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getSiteCost"];
+        /**
+         * Modifica di un costo
+         * @description Permesso: costs.update. Si inviano tutti i campi.
+         */
+        put: operations["updateSiteCost"];
+        post?: never;
+        /**
+         * Eliminazione di un costo
+         * @description Permesso: costs.delete.
+         */
+        delete: operations["deleteSiteCost"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/purchase-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco degli ordini ai fornitori
+         * @description Permesso: purchases.view. Dal più recente, senza le righe. total_amount è la somma degli
+         *     ordini che rispettano i filtri, non solo della pagina. Importi senza IVA.
+         */
+        get: operations["listPurchaseOrders"];
+        put?: never;
+        /**
+         * Nuovo ordine a un fornitore
+         * @description Permesso: purchases.create. Nasce in bozza, con il numero successivo dell'anno della
+         *     data dell'ordine (2026/001), che poi non cambia.
+         */
+        post: operations["createPurchaseOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/purchase-orders/{order}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Un ordine con le righe
+         * @description Permesso: purchases.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getPurchaseOrder"];
+        /**
+         * Modifica di un ordine in bozza
+         * @description Permesso: purchases.update. Si inviano tutti i campi; le righe sostituiscono le
+         *     precedenti. Solo in bozza: altrimenti 409 con code order_not_draft.
+         */
+        put: operations["updatePurchaseOrder"];
+        post?: never;
+        /**
+         * Eliminazione di un ordine in bozza
+         * @description Permesso: purchases.delete. Solo in bozza: altrimenti 409 con code order_not_draft.
+         */
+        delete: operations["deletePurchaseOrder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/purchase-orders/{order}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invio, ricevimento o ritorno indietro di un ordine
+         * @description Permesso: purchases.update. Da draft a sent (inviato al fornitore), da sent a received
+         *     (merce ricevuta), e indietro di un passo: da sent a draft, da received a sent. Un ordine
+         *     senza righe non si invia (422 sotto lines). Gli altri passaggi rispondono 409 con code
+         *     invalid_transition; un ordine già caricato in magazzino non torna indietro (409 con code
+         *     has_documents).
+         */
+        post: operations["changePurchaseOrderStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/purchase-orders/{order}/warehouse-loads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Carico in magazzino della merce di un ordine ricevuto
+         * @description Permessi: warehouse.create e purchases.view. Solo per ordini received (altrimenti 409
+         *     con code invalid_transition). Crea un movimento di carico per ogni riga indicata, con
+         *     la data indicata e collegato all'ordine; gli articoli si scelgono a mano perché le righe
+         *     dell'ordine sono testo libero. Si può caricare in più volte.
+         */
+        post: operations["loadPurchaseOrderIntoWarehouse"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/warehouse/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Articoli di magazzino con la giacenza
+         * @description Permesso: warehouse.view. La ricerca guarda codice e nome. La giacenza è la somma dei
+         *     carichi meno quella degli scarichi, e può essere negativa se manca un carico.
+         */
+        get: operations["listWarehouseItems"];
+        put?: never;
+        /**
+         * Nuovo articolo di magazzino
+         * @description Permesso: warehouse.create. Il codice, se c'è, è unico nell'azienda (422 su code).
+         */
+        post: operations["createWarehouseItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/warehouse/items/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                item: components["parameters"]["WarehouseItemId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Un articolo di magazzino
+         * @description Permesso: warehouse.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getWarehouseItem"];
+        /**
+         * Modifica di un articolo
+         * @description Permesso: warehouse.update. Si inviano tutti i campi.
+         */
+        put: operations["updateWarehouseItem"];
+        post?: never;
+        /**
+         * Eliminazione di un articolo senza movimenti
+         * @description Permesso: warehouse.delete. Con movimenti risponde 409 con code has_documents.
+         */
+        delete: operations["deleteWarehouseItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/warehouse/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Movimenti di magazzino
+         * @description Permesso: warehouse.view. Dal più recente.
+         */
+        get: operations["listWarehouseMovements"];
+        put?: never;
+        /**
+         * Carico o scarico di un articolo
+         * @description Permesso: warehouse.create. Un movimento non si modifica: si elimina e se ne registra un
+         *     altro. Lo scarico verso un cantiere indica site_id.
+         */
+        post: operations["createWarehouseMovement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/warehouse/movements/{movement}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                movement: components["parameters"]["WarehouseMovementId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Eliminazione di un movimento
+         * @description Permesso: warehouse.delete. Il movimento non cambia mai, quindi niente If-Match.
+         */
+        delete: operations["deleteWarehouseMovement"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/cost-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Riepilogo dei costi di un cantiere, confrontato con il budget
+         * @description Permesso: costs.view. Senza permesso risponde 404, non 403. Manodopera e mezzi vengono
+         *     dai rapportini approvati, alle ore per il costo orario attuale di dipendenti e mezzi
+         *     (senza costo orario valgono zero e si contano in missing_hourly_costs); poi i costi
+         *     inseriti a mano per categoria. Importi senza IVA.
+         */
+        get: operations["getSiteCostSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Documenti e foto di un cantiere
+         * @description Permesso: documents.view. Senza permesso, o se il cantiere non c'è, risponde 404. Dal più
+         *     recente. Le foto sono i file JPEG, PNG e WebP; gli altri sono documenti.
+         */
+        get: operations["listSiteDocuments"];
+        put?: never;
+        /**
+         * Caricamento di un documento o di una foto
+         * @description Permesso: documents.create. Il corpo è il file, con il suo Content-Type: PDF, JPEG, PNG,
+         *     WebP, Word (.docx) o Excel (.xlsx), al massimo 20 MB. Il contenuto deve corrispondere al
+         *     tipo dichiarato (altrimenti 422 sotto file). Nome del file e titolo nella query; senza
+         *     titolo vale il nome del file. Il file non si sostituisce: si elimina e se ne carica un
+         *     altro.
+         */
+        post: operations["uploadSiteDocument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/documents/{document}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+                document: components["parameters"]["SiteDocumentId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Un documento del cantiere
+         * @description Permesso: documents.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getSiteDocument"];
+        /**
+         * Modifica di titolo e note di un documento
+         * @description Permesso: documents.update. Si inviano tutti i campi.
+         */
+        put: operations["updateSiteDocument"];
+        post?: never;
+        /**
+         * Eliminazione di un documento
+         * @description Permesso: documents.delete. Elimina anche il file.
+         */
+        delete: operations["deleteSiteDocument"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/documents/{document}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+                document: components["parameters"]["SiteDocumentId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Il file di un documento
+         * @description Permesso: documents.view. Senza permesso risponde 404. Il file arriva sempre come
+         *     allegato (Content-Disposition: attachment, con il nome originale); va bene anche come
+         *     sorgente di un tag img per le anteprime delle foto.
+         */
+        get: operations["getSiteDocumentContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Indicatori della dashboard dell'azienda
+         * @description Qualsiasi membro dell'azienda la chiama; ogni sezione è null se manca il suo permesso:
+         *     sites con sites.view; over_budget con sites.view e costs.view; costs_this_month con
+         *     costs.view; reports con reports.view; deadlines con deadlines.view. Le date sono quelle
+         *     di oggi in Italia. over_budget elenca, dal più sforato, al massimo 10 cantieri non chiusi
+         *     con un budget e costi oltre il budget (manodopera e mezzi dai rapportini approvati, più
+         *     i costi inseriti a mano, come in getSiteCostSummary). costs_this_month somma i costi del
+         *     mese in corso con la stessa regola. deadlines elenca al massimo 10 scadenze aperte,
+         *     scadute o entro 7 giorni, dalla più vecchia; i conteggi sono in getDeadlineSummary.
+         */
+        get: operations["getDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/activities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Cronoprogramma del cantiere
+         * @description Permesso: sites.view. Senza permesso risponde 404, non 403. Tutte le attività del
+         *     cantiere (al massimo 500), senza paginazione, per disegnare il Gantt: in ordine di inizio,
+         *     fine e nome.
+         */
+        get: operations["listSiteActivities"];
+        put?: never;
+        /**
+         * Nuova attività del cronoprogramma
+         * @description Permesso: sites.update. Le dipendenze sono attività dello stesso cantiere che devono
+         *     finire prima che questa inizi; un ciclo di dipendenze dà 422 sotto depends_on. Al
+         *     massimo 500 attività per cantiere (422 sotto `_`).
+         */
+        post: operations["createSiteActivity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/activities/{activity}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+                activity: components["parameters"]["SiteActivityId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di un'attività del cronoprogramma
+         * @description Permesso: sites.update. Si inviano tutti i campi; depends_on sostituisce le dipendenze
+         *     precedenti.
+         */
+        put: operations["updateSiteActivity"];
+        post?: never;
+        /**
+         * Eliminazione di un'attività del cronoprogramma
+         * @description Permesso: sites.update. Le attività che dipendevano da questa perdono la dipendenza.
+         */
+        delete: operations["deleteSiteActivity"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/progress-statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * SAL del computo
+         * @description Permesso: estimates.view. Senza permesso risponde 404. Tutti gli stati di avanzamento
+         *     lavori del computo, in ordine di numero, senza le righe.
+         */
+        get: operations["listProgressStatements"];
+        put?: never;
+        /**
+         * Nuovo SAL
+         * @description Permesso: estimates.update. Il SAL nasce in bozza con il numero successivo. Le quantità
+         *     sono quelle eseguite in questo SAL, voce per voce; il prezzo si copia dalla voce del
+         *     computo. Se c'è già un SAL in bozza risponde 409 con code statement_draft_exists.
+         */
+        post: operations["createProgressStatement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/progress-statements/{statement}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Dettaglio di un SAL
+         * @description Permesso: estimates.view. Le righe sono le voci con una quantità in questo SAL o in uno
+         *     precedente, con quantità e importi del SAL, dei precedenti e progressivi.
+         */
+        get: operations["getProgressStatement"];
+        /**
+         * Modifica di un SAL in bozza
+         * @description Permesso: estimates.update. Si inviano tutti i campi; le righe sostituiscono le
+         *     precedenti e riprendono il prezzo attuale delle voci. Solo in bozza: altrimenti 409 con
+         *     code statement_not_draft.
+         */
+        put: operations["updateProgressStatement"];
+        post?: never;
+        /**
+         * Eliminazione di un SAL in bozza
+         * @description Permesso: estimates.update. Solo in bozza: altrimenti 409 con code statement_not_draft.
+         */
+        delete: operations["deleteProgressStatement"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/progress-statements/{statement}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approvazione di un SAL
+         * @description Permesso: estimates.approve (oltre a estimates.view). Il SAL in bozza diventa approvato
+         *     e non si modifica più: quantità e prezzi restano quelli del momento. Se è già approvato
+         *     risponde 409 con code statement_not_draft.
+         */
+        post: operations["approveProgressStatement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/price-lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco dei prezzari
+         * @description Permesso: price_lists.view. Dal più recente per anno, poi per nome.
+         */
+        get: operations["listPriceLists"];
+        put?: never;
+        /**
+         * Nuovo prezzario
+         * @description Permesso: price_lists.create.
+         */
+        post: operations["createPriceList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/price-lists/{list}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Un prezzario
+         * @description Permesso: price_lists.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getPriceList"];
+        /**
+         * Modifica di un prezzario
+         * @description Permesso: price_lists.update. Si inviano tutti i campi.
+         */
+        put: operations["updatePriceList"];
+        post?: never;
+        /**
+         * Eliminazione di un prezzario
+         * @description Permesso: price_lists.delete. Elimina anche tutte le sue voci.
+         */
+        delete: operations["deletePriceList"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/price-lists/{list}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Voci di un prezzario
+         * @description Permesso: price_lists.view. Senza permesso risponde 404. In ordine di codice.
+         */
+        get: operations["listPriceListItems"];
+        put?: never;
+        /**
+         * Nuova voce del prezzario
+         * @description Permesso: price_lists.update. Il codice è unico nel prezzario, senza distinguere
+         *     maiuscole (altrimenti 422 sotto code).
+         */
+        post: operations["createPriceListItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/price-lists/{list}/items/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+                item: components["parameters"]["PriceListItemId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di una voce del prezzario
+         * @description Permesso: price_lists.update. Si inviano tutti i campi.
+         */
+        put: operations["updatePriceListItem"];
+        post?: never;
+        /**
+         * Eliminazione di una voce del prezzario
+         * @description Permesso: price_lists.update.
+         */
+        delete: operations["deletePriceListItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco dei dipendenti
+         * @description Permesso: employees.view. La ricerca guarda nome e cognome, mansione e codice fiscale.
+         */
+        get: operations["listEmployees"];
+        put?: never;
+        /**
+         * Nuovo dipendente
+         * @description Permesso: employees.create. Il codice fiscale, se c'è, è unico nell'azienda.
+         */
+        post: operations["createEmployee"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei dipendenti in CSV
+         * @description Permesso: employees.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Costo orario con la virgola decimale, data di assunzione come 30/11/2026, Attivo Sì o No.
+         *     Il file si chiama dipendenti.csv.
+         */
+        get: operations["exportEmployees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Scheda di un dipendente
+         * @description Permesso: employees.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getEmployee"];
+        /**
+         * Modifica di un dipendente
+         * @description Permesso: employees.update. Si inviano tutti i campi.
+         */
+        put: operations["updateEmployee"];
+        post?: never;
+        /**
+         * Eliminazione di un dipendente
+         * @description Permesso: employees.delete. Solo se non è in nessuna squadra e non ha documenti
+         *     collegati: altrimenti 409 con code has_documents, e il dipendente va segnato come non
+         *     attivo.
+         */
+        delete: operations["deleteEmployee"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco dei mezzi
+         * @description Permesso: vehicles.view. La ricerca guarda nome, targa e modello.
+         */
+        get: operations["listVehicles"];
+        put?: never;
+        /**
+         * Nuovo mezzo
+         * @description Permesso: vehicles.create. La targa, se c'è, è unica nell'azienda.
+         */
+        post: operations["createVehicle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei mezzi in CSV
+         * @description Permesso: vehicles.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Tipo tradotto (Automezzo, Macchina operatrice, Attrezzatura), costo orario con la virgola decimale.
+         *     Il file si chiama mezzi.csv.
+         */
+        get: operations["exportVehicles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/{vehicle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Scheda di un mezzo
+         * @description Permesso: vehicles.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getVehicle"];
+        /**
+         * Modifica di un mezzo
+         * @description Permesso: vehicles.update. Si inviano tutti i campi.
+         */
+        put: operations["updateVehicle"];
+        post?: never;
+        /**
+         * Eliminazione di un mezzo
+         * @description Permesso: vehicles.delete.
+         */
+        delete: operations["deleteVehicle"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco dei computi metrici
+         * @description Permesso: estimates.view. La ricerca guarda titolo, indirizzo e cliente.
+         */
+        get: operations["listEstimates"];
+        put?: never;
+        /**
+         * Nuovo computo metrico
+         * @description Permesso: estimates.create
+         */
+        post: operations["createEstimate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei computi metrici in CSV
+         * @description Permesso: estimates.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Una riga per computo,
+         *     con il totale (importo con la virgola decimale, anche negativo).
+         *     Il file si chiama computi.csv.
+         */
+        get: operations["exportEstimates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Testata di un computo metrico
+         * @description Permesso: estimates.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getEstimate"];
+        /**
+         * Modifica della testata di un computo
+         * @description Permesso: estimates.update. Si inviano tutti i campi.
+         */
+        put: operations["updateEstimate"];
+        post?: never;
+        /**
+         * Eliminazione di un computo metrico
+         * @description Permesso: estimates.delete.
+         */
+        delete: operations["deleteEstimate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Duplicazione di un computo metrico
+         * @description Permessi: estimates.view ed estimates.create. Crea un computo nuovo in bozza con la
+         *     stessa testata (titolo con «(copia)» in fondo), gli stessi capitoli, voci e righe di
+         *     misura. Senza permesso di vedere il computo risponde 404.
+         */
+        post: operations["duplicateEstimate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nuovo preventivo in bozza dalle voci di un computo
+         * @description Permessi: estimates.view e quotes.create. I capitoli diventano sezioni e le voci righe
+         *     con prezzo, nell'ordine dell'albero: descrizione preceduta dal codice, unità, quantità
+         *     dalle misure, prezzo unitario, sconto 0 e l'aliquota indicata. Il computo non cambia.
+         */
+        post: operations["createQuoteFromEstimate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/structure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Capitoli e voci di un computo
+         * @description Permesso: estimates.view. Senza permesso risponde 404, non 403.
+         *     Tre elenchi piatti, già ordinati per posizione: l'albero si ricostruisce con
+         *     parent_id (capitoli), chapter_id (voci) e item_id (righe di misura).
+         *     I totali di voci, capitoli e computo li calcola il backend: ogni importo di voce è
+         *     arrotondato al centesimo, capitoli e computo sommano gli importi arrotondati.
+         *     L'ETag è la versione dell'albero: cambia a ogni modifica di capitoli, voci o misure.
+         */
+        get: operations["getEstimateStructure"];
+        /**
+         * Riordino e spostamento di capitoli e voci, in blocco
+         * @description Permesso: estimates.update. Si inviano tutti i capitoli e tutte le voci del computo,
+         *     ognuno una volta sola, con il nuovo genitore; l'ordine dell'elenco dà la posizione
+         *     dentro ciascun genitore. Titoli, prezzi e misure non cambiano. If-Match vuole l'ETag
+         *     della struttura. Al massimo 4 livelli di capitoli, senza cicli.
+         */
+        put: operations["arrangeEstimateStructure"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/chapters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nuovo capitolo
+         * @description Permesso: estimates.update. Il capitolo va in fondo al suo livello; al massimo 4 livelli.
+         */
+        post: operations["createEstimateChapter"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/chapters/{chapter}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                chapter: components["parameters"]["ChapterId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di un capitolo
+         * @description Permesso: estimates.update. Si inviano tutti i campi.
+         */
+        put: operations["updateEstimateChapter"];
+        post?: never;
+        /**
+         * Eliminazione di un capitolo
+         * @description Permesso: estimates.update. Elimina anche i sottocapitoli e le voci contenute.
+         */
+        delete: operations["deleteEstimateChapter"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nuova voce
+         * @description Permesso: estimates.update. La voce va in fondo al suo capitolo.
+         */
+        post: operations["createEstimateItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/items/from-price-list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nuova voce presa dal prezzario
+         * @description Permessi: estimates.update e price_lists.view. Copia codice, descrizione, unità e prezzo
+         *     della voce del prezzario; la voce del computo resta poi indipendente (cambiare il
+         *     prezzario non la cambia). Va in fondo al suo capitolo.
+         */
+        post: operations["createEstimateItemFromPriceList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/items/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                item: components["parameters"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di una voce
+         * @description Permesso: estimates.update. Si inviano tutti i campi.
+         */
+        put: operations["updateEstimateItem"];
+        post?: never;
+        /**
+         * Eliminazione di una voce
+         * @description Permesso: estimates.update.
+         */
+        delete: operations["deleteEstimateItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/measurements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nuova riga di misura
+         * @description Permesso: estimates.update. La riga va in fondo alla sua voce.
+         */
+        post: operations["createEstimateMeasurement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/measurements/{measurement}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                measurement: components["parameters"]["MeasurementId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di una riga di misura
+         * @description Permesso: estimates.update. Si inviano tutti i campi.
+         */
+        put: operations["updateEstimateMeasurement"];
+        post?: never;
+        /**
+         * Eliminazione di una riga di misura
+         * @description Permesso: estimates.update.
+         */
+        delete: operations["deleteEstimateMeasurement"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/settings/company": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Dati dell'azienda (ragione sociale, dati fiscali, indirizzo)
+         * @description Permesso: settings.view. Se non sono mai stati salvati, la ragione sociale è il nome
+         *     dell'azienda, gli altri campi sono null e l'ETag è "0". Sono i dati stampati nei PDF.
+         */
+        get: operations["getCompanyProfile"];
+        /**
+         * Modifica dei dati dell'azienda
+         * @description Permesso: settings.update. Si inviano tutti i campi; il primo salvataggio usa
+         *     If-Match "0".
+         */
+        put: operations["updateCompanyProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/settings/numbering": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Numerazioni dei documenti
+         * @description Permesso: settings.view. Per ora i soli preventivi: il prossimo numero dell'anno in
+         *     corso (data italiana).
+         */
+        get: operations["getNumbering"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/settings/numbering/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Prossimo numero dei preventivi di un anno
+         * @description Permesso: settings.update. Serve a chi arriva da un altro programma a metà anno: il
+         *     prossimo preventivo inviato in quell'anno prende next_number. Si può anche abbassare,
+         *     ma mai fino a un numero già usato (409 code number_in_use), così non ci sono doppioni.
+         *     L'anno è quello in corso, il precedente o il successivo.
+         */
+        put: operations["setQuoteNumbering"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/settings/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Logo dell'azienda
+         * @description Qualsiasi membro dell'azienda lo vede, senza permessi: l'interfaccia lo mostra a tutti.
+         *     Senza logo risponde 404.
+         */
+        get: operations["getCompanyLogo"];
+        /**
+         * Caricamento del logo
+         * @description Permesso: settings.update. Il corpo è il file, con Content-Type image/png o image/jpeg:
+         *     al massimo 512 KB e 2000×2000 pixel; PNG a 8 bit non interlacciato (anche con
+         *     trasparenza), JPEG a colori o in grigio. Sostituisce il logo precedente. Il logo
+         *     compare nei PDF.
+         */
+        put: operations["setCompanyLogo"];
+        post?: never;
+        /**
+         * Eliminazione del logo
+         * @description Permesso: settings.update. Senza logo risponde comunque 204.
+         */
+        delete: operations["deleteCompanyLogo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ruoli dell'azienda con i loro permessi
+         * @description Permesso: users.view. Tutti i ruoli, in ordine di nome, senza paginazione (sono pochi).
+         *     I permessi di ogni ruolo sono in ordine alfabetico.
+         */
+        get: operations["listRoles"];
+        put?: never;
+        /**
+         * Nuovo ruolo
+         * @description Permesso: roles.manage. Il nome è unico nell'azienda (422 sul campo name). I permessi
+         *     doppi si tolgono.
+         */
+        post: operations["createRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/roles/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                role: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di nome e permessi di un ruolo
+         * @description Permesso: roles.manage. Si inviano nome e tutti i permessi: sostituiscono quelli di
+         *     prima e valgono subito per chi ha il ruolo. Senza If-Match (valori assoluti, li cambia
+         *     solo il titolare). Se nessun utente attivo avrebbe più users.manage la risposta è 409
+         *     con code last_manager e non cambia niente.
+         */
+        put: operations["updateRole"];
+        post?: never;
+        /**
+         * Eliminazione di un ruolo
+         * @description Permesso: roles.manage. Solo se nessun utente lo usa, nemmeno disattivato (409 con code
+         *     role_in_use: prima si cambia ruolo a quegli utenti). Gli inviti in attesa con quel
+         *     ruolo vengono annullati.
+         */
+        delete: operations["deleteRole"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Registro delle modifiche
+         * @description Permesso: audit.view. Chi ha creato, modificato o eliminato clienti, fornitori,
+         *     scadenze, computi e preventivi, e quando; dal più recente. Di una modifica si danno i
+         *     nomi dei campi cambiati, non i valori. Con filter[entity] e filter[entity_id] si ha
+         *     la storia di un solo documento.
+         */
+        get: operations["listAuditLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Utenti dell'azienda con il loro ruolo
+         * @description Permesso: users.view. Tutti i membri, in ordine di nome, senza paginazione; active è
+         *     false per un utente disattivato.
+         */
+        get: operations["listCompanyUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/users/{user}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                user: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Cambio del ruolo di un utente
+         * @description Permesso: users.manage. Vale subito, anche per le sessioni aperte. Senza If-Match: il
+         *     valore è assoluto. Se dopo il cambio nessun utente attivo avrebbe più users.manage la
+         *     risposta è 409 con code last_manager e non cambia niente.
+         */
+        put: operations["changeUserRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/users/{user}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                user: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disattivazione di un utente in questa azienda
+         * @description Permesso: users.manage. L'utente perde subito l'accesso a questa azienda (le altre e
+         *     l'account restano); nell'elenco ha active false. Non si disattiva sé stessi (409 code
+         *     self_deactivation) né l'ultimo utente attivo con users.manage (409 code last_manager).
+         *     Disattivare due volte non cambia niente.
+         */
+        post: operations["deactivateUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/users/{user}/reactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                user: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Riattivazione di un utente in questa azienda
+         * @description Permesso: users.manage. Torna con il ruolo che aveva. Un account disattivato in
+         *     generale resta con active false.
+         */
+        post: operations["reactivateUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Inviti in attesa
+         * @description Permesso: users.manage. Gli inviti non ancora accettati, dal più recente, senza
+         *     paginazione; status è expired per quelli scaduti, che si possono eliminare o rifare.
+         *     Gli inviti accettati non compaiono: la persona è tra gli utenti.
+         */
+        get: operations["listInvitations"];
+        put?: never;
+        /**
+         * Invito di una persona con un ruolo
+         * @description Permesso: users.manage. Il link è /invito/{token}, vale 7 giorni e una volta sola.
+         *     Il backend lo manda per email all'invitato; il token compare anche in questa risposta
+         *     (e solo qui: il backend ne tiene l'impronta), così il link si può copiare e girare. Un nuovo
+         *     invito per la stessa email sostituisce quello in attesa. Se l'email è già di un
+         *     membro dell'azienda la risposta è 409 con code already_member.
+         */
+        post: operations["createInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invitations/{invitation}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invitation: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Annullamento di un invito in attesa
+         * @description Permesso: users.manage. Il link smette di funzionare. Un invito non si modifica, quindi
+         *     niente If-Match; uno già accettato risponde 404.
+         */
+        delete: operations["deleteInvitation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/invitations/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["InvitationToken"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Invito dietro un link, per la pagina /invito/:token
+         * @description Non serve la sessione. Un token sconosciuto, già usato o scaduto risponde 404, sempre
+         *     con lo stesso messaggio. account_exists dice se l'email ha già un account: in quel
+         *     caso la pagina chiede solo la password, altrimenti anche il nome.
+         */
+        get: operations["getInvitation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/invitations/{token}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["InvitationToken"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accettazione di un invito
+         * @description Serve il token CSRF (come per l'accesso). Senza account si inviano nome e password
+         *     nuova (almeno 10 caratteri) e il backend crea l'account; con un account si invia la
+         *     sua password (name è ignorato). Se va a buon fine l'utente entra nell'azienda con il
+         *     ruolo dell'invito e il backend apre una sessione nuova, come all'accesso. Una
+         *     password sbagliata risponde 422 sul campo password e conta come tentativo di accesso
+         *     fallito. Un utente già membro riceve 409 con code already_member.
+         */
+        post: operations["acceptInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Elenco dei preventivi
+         * @description Permesso: quotes.view. La ricerca guarda oggetto, numero e cliente.
+         */
+        get: operations["listQuotes"];
+        put?: never;
+        /**
+         * Nuovo preventivo, in bozza
+         * @description Permesso: quotes.create. Numero e data arrivano al primo invio.
+         */
+        post: operations["createQuote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei preventivi in CSV
+         * @description Permesso: quotes.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Una riga per preventivo,
+         *     con imponibile, IVA e totale (importi con la virgola decimale), date come 30/11/2026.
+         *     Il file si chiama preventivi.csv.
+         */
+        get: operations["exportQuotes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes/{quote}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Testata di un preventivo
+         * @description Permesso: quotes.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getQuote"];
+        /**
+         * Modifica della testata di un preventivo in bozza
+         * @description Permesso: quotes.update. Si inviano tutti i campi. Solo in bozza.
+         */
+        put: operations["updateQuote"];
+        post?: never;
+        /**
+         * Eliminazione di un preventivo in bozza
+         * @description Permesso: quotes.delete. Un preventivo numerato non si elimina, per non lasciare buchi.
+         */
+        delete: operations["deleteQuote"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes/{quote}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invio di un preventivo in bozza
+         * @description Permesso: quotes.update. Segna il preventivo come inviato, gli dà il numero successivo
+         *     dell'anno (2026/001, senza buchi) e la data di oggi; la validità parte da quella data.
+         *     Una revisione prende invece il numero del preventivo da cui nasce, con la revisione
+         *     successiva (2026/001-R1).
+         */
+        post: operations["sendQuote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes/{quote}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Esito di un preventivo inviato
+         * @description Permesso: quotes.update. Da sent si passa ad accepted, rejected o expired; da questi
+         *     si torna a sent per correggere un errore. Una bozza si invia con send. Numero, data e
+         *     righe non cambiano.
+         */
+        post: operations["changeQuoteStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes/{quote}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * PDF del preventivo
+         * @description Permesso: quotes.view. Il preventivo in A4, pronto da stampare o allegare: intestazione
+         *     con il nome dell'azienda, cliente, oggetto, righe, totali per aliquota, validità, note,
+         *     condizioni e spazio per l'accettazione. Una bozza esce con la dicitura «bozza» e senza
+         *     numero. Il file si chiama preventivo-2026-001.pdf (preventivo-bozza.pdf in bozza).
+         *     Senza permesso risponde 404, non 403.
+         */
+        get: operations["getQuotePdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes/{quote}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revisione di un preventivo inviato
+         * @description Permessi: quotes.view e quotes.create. Crea una bozza con la stessa testata e le stesse
+         *     righe, collegata al preventivo di partenza (revision_of), che resta com'è. Si rivede un
+         *     preventivo inviato, rifiutato o scaduto; non una bozza né uno accettato. Al primo invio
+         *     la revisione prende lo stesso numero con la revisione successiva (2026/001-R1), senza
+         *     usare un numero nuovo. Senza permesso di vedere il preventivo risponde 404.
+         */
+        post: operations["reviseQuote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes/{quote}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Righe di un preventivo
+         * @description Permesso: quotes.view. Tutte le righe, in ordine, senza paginazione.
+         */
+        get: operations["listQuoteLines"];
+        put?: never;
+        /**
+         * Nuova riga, in fondo al preventivo
+         * @description Permesso: quotes.update. Solo in bozza.
+         */
+        post: operations["createQuoteLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes/{quote}/lines/{line}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+                line: components["parameters"]["LineId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di una riga
+         * @description Permesso: quotes.update. Si inviano tutti i campi. Solo in bozza.
+         */
+        put: operations["updateQuoteLine"];
+        post?: never;
+        /**
+         * Eliminazione di una riga
+         * @description Permesso: quotes.update. Solo in bozza.
+         */
+        delete: operations["deleteQuoteLine"];
         options?: never;
         head?: never;
         patch?: never;
@@ -148,11 +2817,21 @@ export interface components {
          * @example 0b8f6a52-3c1e-4d7a-9f20-6f1b2c3d4e5f
          */
         Id: string;
-        /** @example impresa-rossi */
+        /**
+         * @description Non cambia dopo la creazione. Sono riservati i nomi delle rotte fisse del frontend
+         *     (accedi, profilo, password-dimenticata, invito).
+         * @example impresa-rossi
+         */
         Slug: string;
         Error: {
             /** @description Messaggio in italiano, mostrabile all'utente. */
             message: string;
+            /**
+             * @description Codice stabile per i casi che il frontend deve riconoscere senza leggere il testo.
+             *     Per ora: csrf_invalid, stale_record, precondition_required, has_documents,
+             *     statement_draft_exists, statement_not_draft.
+             */
+            code?: string;
         };
         ValidationError: {
             message: string;
@@ -179,6 +2858,23 @@ export interface components {
             /** Format: password */
             password: string;
         };
+        ProfileInput: {
+            name: string;
+        };
+        PasswordChangeInput: {
+            /** Format: password */
+            current_password: string;
+            /** Format: password */
+            new_password: string;
+        };
+        PasswordResetRequestInput: {
+            /** Format: email */
+            email: string;
+        };
+        PasswordResetInput: {
+            /** Format: password */
+            new_password: string;
+        };
         Me: {
             id: components["schemas"]["Id"];
             name: string;
@@ -202,16 +2898,90 @@ export interface components {
              */
             permissions: components["schemas"]["Permission"][];
         };
+        Role: {
+            id: components["schemas"]["Id"];
+            /** @example Ufficio */
+            name: string;
+            permissions: components["schemas"]["Permission"][];
+        };
+        RoleInput: {
+            name: string;
+            permissions: components["schemas"]["Permission"][];
+        };
+        RoleList: {
+            data: components["schemas"]["Role"][];
+        };
+        CompanyUser: {
+            id: components["schemas"]["Id"];
+            name: string;
+            /** Format: email */
+            email: string;
+            active: boolean;
+            role: {
+                id: components["schemas"]["Id"];
+                name: string;
+            };
+            /** Format: date-time */
+            joined_at: string;
+        };
+        CompanyUserList: {
+            data: components["schemas"]["CompanyUser"][];
+        };
+        UserRoleInput: {
+            role_id: components["schemas"]["Id"];
+        };
+        InvitationInput: {
+            /** Format: email */
+            email: string;
+            role_id: components["schemas"]["Id"];
+        };
+        Invitation: {
+            id: components["schemas"]["Id"];
+            /** Format: email */
+            email: string;
+            role: {
+                id: components["schemas"]["Id"];
+                name: string;
+            };
+            /** @enum {string} */
+            status: "pending" | "expired";
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        InvitationCreated: components["schemas"]["Invitation"] & {
+            /** @description Da mettere nel link /invito/{token}. Non si può più rileggere. */
+            token: string;
+        };
+        InvitationList: {
+            data: components["schemas"]["Invitation"][];
+        };
+        InvitationPreview: {
+            company_name: string;
+            /** Format: email */
+            email: string;
+            role_name: string;
+            /** Format: date-time */
+            expires_at: string;
+            account_exists: boolean;
+        };
+        InvitationAcceptInput: {
+            /** @description Obbligatorio solo se l'account non esiste. */
+            name?: string | null;
+            /** Format: password */
+            password: string;
+        };
         /**
          * @description Nella forma <area>.<azione>. L'elenco cresce con i moduli.
          * @enum {string}
          */
-        Permission: "clients.view" | "clients.create" | "clients.update";
+        Permission: "clients.view" | "clients.create" | "clients.update" | "clients.delete" | "suppliers.view" | "suppliers.create" | "suppliers.update" | "suppliers.delete" | "deadlines.view" | "deadlines.create" | "deadlines.update" | "deadlines.delete" | "estimates.view" | "estimates.create" | "estimates.update" | "estimates.delete" | "estimates.approve" | "sites.view" | "sites.create" | "sites.update" | "sites.delete" | "employees.view" | "employees.create" | "employees.update" | "employees.delete" | "vehicles.view" | "vehicles.create" | "vehicles.update" | "vehicles.delete" | "reports.view" | "reports.create" | "reports.update" | "reports.delete" | "reports.approve" | "costs.view" | "costs.create" | "costs.update" | "costs.delete" | "documents.view" | "documents.create" | "documents.update" | "documents.delete" | "price_lists.view" | "price_lists.create" | "price_lists.update" | "price_lists.delete" | "purchases.view" | "purchases.create" | "purchases.update" | "purchases.delete" | "warehouse.view" | "warehouse.create" | "warehouse.update" | "warehouse.delete" | "quotes.view" | "quotes.create" | "quotes.update" | "quotes.delete" | "settings.view" | "settings.update" | "users.view" | "users.manage" | "roles.manage" | "audit.view";
         /**
-         * @description company: impresa o ente, con partita IVA. person: privato, con codice fiscale.
+         * @description company: impresa, condominio o associazione. person: privato. public_body: ente pubblico.
          * @enum {string}
          */
-        ClientKind: "company" | "person";
+        ClientKind: "company" | "person" | "public_body";
         /**
          * @description Dati di un cliente, uguali in creazione e in modifica. I campi facoltativi si inviano
          *     comunque, con null se vuoti.
@@ -220,34 +2990,1153 @@ export interface components {
             kind: components["schemas"]["ClientKind"];
             /** @description Ragione sociale, oppure nome e cognome. */
             name: string;
-            /** @description Partita IVA. Obbligatoria se kind è company; unica nell'azienda. */
+            /**
+             * @description Partita IVA, unica nell'azienda. Con country IT, per company e public_body serve
+             *     almeno una tra partita IVA e codice fiscale. Il backend la restituisce normalizzata:
+             *     senza spazi, in maiuscolo, senza il prefisso IT.
+             */
             vat_number: string | null;
-            /** @description Codice fiscale. Obbligatorio se kind è person. */
+            /**
+             * @description Codice fiscale. Con country IT è obbligatorio se kind è person. Unico nell'azienda
+             *     per lo stesso kind. Normalizzato come la partita IVA.
+             */
             tax_code: string | null;
             /** Format: email */
             email: string | null;
             /** Format: email */
             pec: string | null;
             phone: string | null;
-            /** @description Codice destinatario per la fattura elettronica. */
+            /** @description Codice destinatario: 7 caratteri, 6 per la pubblica amministrazione. */
             sdi_code: string | null;
             street: string | null;
             postal_code: string | null;
             city: string | null;
-            /** @description Sigla della provincia (TO, MI). */
+            /** @description Sigla della provincia (TO, MI). Vuota per i clienti esteri. */
             province: string | null;
+            /**
+             * @description Paese, codice ISO 3166-1 alpha-2.
+             * @default IT
+             * @example IT
+             */
+            country: string;
             notes: string | null;
         };
         Client: components["schemas"]["ClientInput"] & {
+            id: components["schemas"]["Id"];
+            /**
+             * Format: date-time
+             * @description Data di archiviazione; null se il cliente è attivo.
+             */
+            archived_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description client: cliente. supplier: fornitore. deadline: scadenza. estimate: computo metrico.
+         *     quote: preventivo. site: cantiere. employee: dipendente. vehicle: mezzo.
+         *     daily_report: rapportino. site_cost: costo. site_document: documento o foto del cantiere.
+         *     purchase_order: ordine a un fornitore. warehouse_item: articolo di magazzino.
+         * @enum {string}
+         */
+        AuditEntity: "client" | "supplier" | "deadline" | "estimate" | "quote" | "site" | "employee" | "vehicle" | "daily_report" | "site_cost" | "site_document" | "purchase_order" | "warehouse_item";
+        AuditEntry: {
+            /** @description Progressivo del registro, come testo. */
+            id: string;
+            entity: components["schemas"]["AuditEntity"];
+            entity_id: components["schemas"]["Id"];
+            /**
+             * @description create, update o delete.
+             * @enum {string}
+             */
+            action: "create" | "update" | "delete";
+            /**
+             * @description Per update, i nomi dei campi cambiati, in ordine alfabetico. Sono i nomi delle
+             *     colonne del database, quasi sempre uguali ai campi del contratto (name, status,
+             *     client_id…); gli importi hanno il suffisso _cents (amount_cents). Vuoto per create
+             *     e delete.
+             */
+            fields: string[];
+            /** @description Chi ha fatto la modifica; null se non è passata dall'API. */
+            user: null | {
+                id: components["schemas"]["Id"];
+                /** @description Vuoto se l'account non esiste più. */
+                name: string;
+            };
+            /** Format: date-time */
+            created_at: string;
+        };
+        AuditLogList: {
+            data: components["schemas"]["AuditEntry"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        ClientList: {
+            data: components["schemas"]["Client"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description materials: materiali. rentals: noli (mezzi e attrezzature). subcontracting: subappalto.
+         *     services: servizi (progettisti, consulenti, trasporti). other: altro.
+         * @enum {string}
+         */
+        SupplierCategory: "materials" | "rentals" | "subcontracting" | "services" | "other";
+        /**
+         * @description Dati di un fornitore, uguali in creazione e in modifica. I campi facoltativi si inviano
+         *     comunque, con null se vuoti.
+         */
+        SupplierInput: {
+            /** @description Ragione sociale, oppure nome e cognome della ditta individuale. */
+            name: string;
+            /**
+             * @description Partita IVA, unica nell'azienda. Con country IT serve almeno una tra partita IVA e
+             *     codice fiscale. Restituita normalizzata come per i clienti.
+             */
+            vat_number: string | null;
+            /** @description Codice fiscale, unico nell'azienda. Normalizzato come la partita IVA. */
+            tax_code: string | null;
+            /** Format: email */
+            email: string | null;
+            /** Format: email */
+            pec: string | null;
+            phone: string | null;
+            street: string | null;
+            postal_code: string | null;
+            city: string | null;
+            /** @description Sigla della provincia (TO, MI). Vuota per i fornitori esteri. */
+            province: string | null;
+            /**
+             * @description Paese, codice ISO 3166-1 alpha-2.
+             * @default IT
+             * @example IT
+             */
+            country: string;
+            /** @description Una o più categorie, anche nessuna. I doppioni vengono tolti. */
+            categories: components["schemas"]["SupplierCategory"][];
+            /**
+             * @description Subappaltatore: per lui contano i documenti di regolarità (DURC, visura,
+             *     assicurazione) con le loro scadenze.
+             */
+            subcontractor: boolean;
+            notes: string | null;
+        };
+        Supplier: components["schemas"]["SupplierInput"] & {
+            id: components["schemas"]["Id"];
+            /**
+             * Format: date-time
+             * @description Data di archiviazione; null se il fornitore è attivo.
+             */
+            archived_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SupplierList: {
+            data: components["schemas"]["Supplier"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description durc: DURC. chamber_extract: visura camerale. insurance: polizza assicurativa (RCT/RCO).
+         *     other: altro documento (descrizione obbligatoria).
+         * @enum {string}
+         */
+        SupplierDocumentKind: "durc" | "chamber_extract" | "insurance" | "other";
+        /**
+         * Format: date
+         * @description Data senza ora, AAAA-MM-GG.
+         * @example 2026-11-30
+         */
+        Date: string;
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        SupplierDocumentInput: {
+            kind: components["schemas"]["SupplierDocumentKind"];
+            /** @description Obbligatoria se kind è other. */
+            description: string | null;
+            issued_on: components["schemas"]["Date"] | null;
+            /** @description Non prima di issued_on. Null se il documento non scade. */
+            expires_on: components["schemas"]["Date"] | null;
+            notes: string | null;
+        };
+        SupplierDocument: components["schemas"]["SupplierDocumentInput"] & {
+            id: components["schemas"]["Id"];
+            supplier_id: components["schemas"]["Id"];
+            /**
+             * @description Calcolato dal backend sulla data di oggi (ora italiana). valid: valido.
+             *     expiring: scade entro 30 giorni. expired: scaduto. no_expiry: senza scadenza.
+             * @enum {string}
+             */
+            status: "valid" | "expiring" | "expired" | "no_expiry";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SupplierDocumentList: {
+            data: components["schemas"]["SupplierDocument"][];
+        };
+        /**
+         * @description Importo in euro come stringa con due decimali e il punto, mai numero JSON. In ingresso
+         *     si accettano anche zero o un decimale.
+         * @example 1234.50
+         */
+        Amount: string;
+        /**
+         * @description Importo calcolato dal backend, in euro con due decimali e il punto, mai numero JSON.
+         *     Può essere negativo (ad esempio una voce di sole detrazioni).
+         * @example 1234.50
+         * @example -12.00
+         */
+        SignedAmount: string;
+        /**
+         * @description durc, insurance (assicurazione), tax (imposte e contributi), invoice_in (fattura da
+         *     pagare), invoice_out (fattura da incassare), contract (contratto), vehicle (mezzo:
+         *     bollo, revisione), other.
+         * @enum {string}
+         */
+        DeadlineKind: "durc" | "insurance" | "tax" | "invoice_in" | "invoice_out" | "contract" | "vehicle" | "other";
+        /** @enum {string} */
+        DeadlineStatus: "open" | "done";
+        /**
+         * @description monthly (ogni mese), quarterly (ogni tre mesi), yearly (ogni anno). La data successiva
+         *     si ottiene aggiungendo l'intervallo; a fine mese si ferma all'ultimo giorno (31/01 →
+         *     28/02).
+         * @enum {string}
+         */
+        DeadlineRecurrence: "monthly" | "quarterly" | "yearly";
+        /** @description Cliente o fornitore collegato, con il nome per mostrarlo senza altre chiamate. */
+        SubjectRef: {
+            id: components["schemas"]["Id"];
+            name: string;
+        };
+        /**
+         * @description I campi facoltativi si inviano comunque, con null se vuoti. Al massimo uno tra
+         *     client_id e supplier_id.
+         */
+        DeadlineInput: {
+            title: string;
+            due_on: components["schemas"]["Date"];
+            kind: components["schemas"]["DeadlineKind"];
+            amount: components["schemas"]["Amount"] | null;
+            client_id: components["schemas"]["Id"] | null;
+            supplier_id: components["schemas"]["Id"] | null;
+            notes: string | null;
+            recurrence: components["schemas"]["DeadlineRecurrence"] | null;
+        };
+        Deadline: components["schemas"]["DeadlineInput"] & {
+            id: components["schemas"]["Id"];
+            /** @description In uscita sempre con due decimali. */
+            amount?: string | null;
+            status: components["schemas"]["DeadlineStatus"];
+            /**
+             * @description Documento di regolarità del fornitore da cui nasce la scadenza. Il backend la
+             *     tiene allineata alla data di scadenza del documento (un rinnovo la riapre) e la
+             *     elimina con il documento: si modifica dal documento, non da qui.
+             */
+            supplier_document_id: components["schemas"]["Id"] | null;
+            /** @description La scadenza creata completando questa, se ricorrente. */
+            next_deadline_id: components["schemas"]["Id"] | null;
+            /** Format: date-time */
+            done_at: string | null;
+            client: components["schemas"]["SubjectRef"] | null;
+            supplier: components["schemas"]["SubjectRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DeadlineBucket: {
+            count: number;
+            /** @description Somma degli importi, con due decimali; le scadenze senza importo valgono zero. */
+            amount: string;
+        };
+        DeadlineSummary: {
+            today: components["schemas"]["Date"];
+            overdue: components["schemas"]["DeadlineBucket"];
+            next_7_days: components["schemas"]["DeadlineBucket"];
+            next_30_days: components["schemas"]["DeadlineBucket"];
+        };
+        DeadlineList: {
+            data: components["schemas"]["Deadline"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description planned: da iniziare. active: in corso. suspended: sospeso. completed: chiuso.
+         * @enum {string}
+         */
+        SiteStatus: "planned" | "active" | "suspended" | "completed";
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        SiteInput: {
+            /** @description Codice della commessa, unico nell'azienda (senza distinguere maiuscole). */
+            code: string | null;
+            name: string;
+            client_id: components["schemas"]["Id"] | null;
+            /** @description Indirizzo del cantiere, in una riga. */
+            address: string | null;
+            status: components["schemas"]["SiteStatus"];
+            /** @description Inizio dei lavori. */
+            start_on: components["schemas"]["Date"] | null;
+            /** @description Fine prevista, non prima dell'inizio. */
+            end_on: components["schemas"]["Date"] | null;
+            /** @description Budget di costo del cantiere. */
+            budget: components["schemas"]["Amount"] | null;
+            notes: string | null;
+        };
+        Site: components["schemas"]["SiteInput"] & {
+            id: components["schemas"]["Id"];
+            client: components["schemas"]["SubjectRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SiteList: {
+            data: components["schemas"]["Site"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        SiteTeamInput: {
+            employee_ids: components["schemas"]["Id"][];
+        };
+        SiteTeamMember: {
+            employee_id: components["schemas"]["Id"];
+            first_name: string;
+            last_name: string;
+            job_title: string | null;
+            active: boolean;
+        };
+        SiteTeam: {
+            data: components["schemas"]["SiteTeamMember"][];
+        };
+        /**
+         * @description draft: bozza. submitted: inviato all'ufficio. approved: approvato.
+         * @enum {string}
+         */
+        DailyReportStatus: "draft" | "submitted" | "approved";
+        /**
+         * @description Ore come stringa con il punto, da 0.01 a 24; in uscita sempre con due decimali.
+         * @example 8.00
+         * @example 7.5
+         */
+        Hours: string;
+        /**
+         * @description I campi facoltativi si inviano comunque, con null se vuoti. labor e vehicles sono gli
+         *     elenchi completi (anche vuoti), al massimo 100 righe ciascuno, senza doppioni; gli
+         *     errori delle righe usano il percorso con l'indice (labor.0.hours).
+         */
+        DailyReportInput: {
+            site_id: components["schemas"]["Id"];
+            date: components["schemas"]["Date"];
+            /** @description Condizioni meteo, testo libero. */
+            weather: string | null;
+            /** @description Lavori svolti nella giornata. */
+            work_done: string | null;
+            notes: string | null;
+            labor: {
+                employee_id: components["schemas"]["Id"];
+                hours: components["schemas"]["Hours"];
+                description: string | null;
+            }[];
+            vehicles: {
+                vehicle_id: components["schemas"]["Id"];
+                hours: components["schemas"]["Hours"];
+                description: string | null;
+            }[];
+        };
+        UserRef: {
+            id: components["schemas"]["Id"];
+            name: string;
+        };
+        DailyReportSummary: {
+            id: components["schemas"]["Id"];
+            site_id: components["schemas"]["Id"];
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+            };
+            date: components["schemas"]["Date"];
+            status: components["schemas"]["DailyReportStatus"];
+            weather: string | null;
+            work_done: string | null;
+            notes: string | null;
+            total_labor_hours: components["schemas"]["Hours"];
+            total_vehicle_hours: components["schemas"]["Hours"];
+            /** @description Chi ha scritto il rapportino; null per i dati caricati fuori dall'API. */
+            created_by: components["schemas"]["UserRef"] | null;
+            /** Format: date-time */
+            submitted_at: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            approved_by: components["schemas"]["UserRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DailyReport: components["schemas"]["DailyReportSummary"] & {
+            /** @description Ore dei dipendenti, senza costi. */
+            labor: {
+                employee_id: components["schemas"]["Id"];
+                first_name: string;
+                last_name: string;
+                hours: components["schemas"]["Hours"];
+                description: string | null;
+            }[];
+            /** @description Ore dei mezzi, senza costi. */
+            vehicles: {
+                vehicle_id: components["schemas"]["Id"];
+                name: string;
+                plate: string | null;
+                hours: components["schemas"]["Hours"];
+                description: string | null;
+            }[];
+        };
+        DailyReportToday: {
+            date: components["schemas"]["Date"];
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+            };
+            /** @description Il rapportino già scritto per quel giorno, oppure null. */
+            report: components["schemas"]["DailyReport"] | null;
+            proposal: components["schemas"]["DailyReportInput"];
+            /** @description Dipendenti attivi, per cognome e nome; in_team se sono nella squadra. */
+            employees: {
+                id: components["schemas"]["Id"];
+                first_name: string;
+                last_name: string;
+                in_team: boolean;
+            }[];
+            /** @description Mezzi attivi, per nome. */
+            vehicles: {
+                id: components["schemas"]["Id"];
+                name: string;
+                plate: string | null;
+            }[];
+        };
+        DailyReportList: {
+            data: components["schemas"]["DailyReportSummary"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description materials: materiali. rentals: noli. subcontract: subappalti. other: altro.
+         * @enum {string}
+         */
+        CostCategory: "materials" | "rentals" | "subcontract" | "other";
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        SiteCostInput: {
+            site_id: components["schemas"]["Id"];
+            date: components["schemas"]["Date"];
+            category: components["schemas"]["CostCategory"];
+            description: string;
+            supplier_id: components["schemas"]["Id"] | null;
+            /** @description Importo del costo, senza IVA, non negativo. */
+            amount: components["schemas"]["Amount"];
+            notes: string | null;
+        };
+        SiteCost: components["schemas"]["SiteCostInput"] & {
+            id: components["schemas"]["Id"];
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+            };
+            supplier: components["schemas"]["SubjectRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description draft: bozza. sent: inviato al fornitore. received: merce ricevuta.
+         * @enum {string}
+         */
+        PurchaseOrderStatus: "draft" | "sent" | "received";
+        PurchaseOrderLineInput: {
+            description: string;
+            /** @example m³ */
+            unit: string | null;
+            /** @description Quantità maggiore di zero. */
+            quantity: components["schemas"]["Quantity"];
+            /** @description Prezzo unitario senza IVA. */
+            unit_price: components["schemas"]["Amount"];
+        };
+        PurchaseOrderLine: components["schemas"]["PurchaseOrderLineInput"] & {
+            /** @description Quantità per prezzo, arrotondato al centesimo. */
+            amount: components["schemas"]["Amount"];
+        };
+        /**
+         * @description I campi facoltativi si inviano comunque, con null se vuoti. Al massimo 200 righe;
+         *     la consegna prevista non può essere prima della data dell'ordine.
+         */
+        PurchaseOrderInput: {
+            supplier_id: components["schemas"]["Id"];
+            site_id: components["schemas"]["Id"] | null;
+            date: components["schemas"]["Date"];
+            /** @description Consegna prevista. */
+            delivery_date: components["schemas"]["Date"] | null;
+            notes: string | null;
+            lines: components["schemas"]["PurchaseOrderLineInput"][];
+        };
+        PurchaseOrderSummary: {
+            id: components["schemas"]["Id"];
+            /** @example 2026/001 */
+            number: string;
+            status: components["schemas"]["PurchaseOrderStatus"];
+            supplier_id: components["schemas"]["Id"];
+            supplier: components["schemas"]["SubjectRef"];
+            site_id: components["schemas"]["Id"] | null;
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+            } | null;
+            date: components["schemas"]["Date"];
+            delivery_date: components["schemas"]["Date"] | null;
+            notes: string | null;
+            line_count: number;
+            /** @description Somma delle righe, senza IVA. */
+            total: components["schemas"]["Amount"];
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            received_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PurchaseOrder: components["schemas"]["PurchaseOrderSummary"] & {
+            lines: components["schemas"]["PurchaseOrderLine"][];
+        };
+        PurchaseOrderList: {
+            data: components["schemas"]["PurchaseOrderSummary"][];
+            meta: components["schemas"]["ListMeta"];
+            total_amount: components["schemas"]["Amount"];
+        };
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        WarehouseItemInput: {
+            code: string | null;
+            name: string;
+            /** @example sacchi */
+            unit: string;
+            notes: string | null;
+        };
+        WarehouseItem: components["schemas"]["WarehouseItemInput"] & {
+            id: components["schemas"]["Id"];
+            stock: components["schemas"]["Quantity"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        WarehouseItemList: {
+            data: components["schemas"]["WarehouseItem"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description in: carico. out: scarico.
+         * @enum {string}
+         */
+        WarehouseMovementKind: "in" | "out";
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        WarehouseMovementInput: {
+            item_id: components["schemas"]["Id"];
+            date: components["schemas"]["Date"];
+            kind: components["schemas"]["WarehouseMovementKind"];
+            /** @description Quantità maggiore di zero, nell'unità dell'articolo. */
+            quantity: components["schemas"]["Quantity"];
+            site_id: components["schemas"]["Id"] | null;
+            notes: string | null;
+        };
+        WarehouseMovement: components["schemas"]["WarehouseMovementInput"] & {
+            id: components["schemas"]["Id"];
+            /** @description L'ordine ricevuto da cui viene il carico, se c'è. */
+            purchase_order: {
+                id: components["schemas"]["Id"];
+                /** @example 2026/001 */
+                number: string;
+            } | null;
+            item: {
+                id: components["schemas"]["Id"];
+                code: string | null;
+                name: string;
+                unit: string;
+            };
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+            } | null;
+            created_by: components["schemas"]["UserRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        WarehouseMovementList: {
+            data: components["schemas"]["WarehouseMovement"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        SiteCostSummary: {
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+            };
+            labor: components["schemas"]["HoursCost"];
+            vehicles: components["schemas"]["HoursCost"];
+            materials: components["schemas"]["Amount"];
+            rentals: components["schemas"]["Amount"];
+            subcontract: components["schemas"]["Amount"];
+            other: components["schemas"]["Amount"];
+            total: components["schemas"]["Amount"];
+            budget: components["schemas"]["Amount"] | null;
+            /** @description Budget meno totale; negativo se il cantiere è sopra budget, null senza budget. */
+            budget_remaining: components["schemas"]["SignedAmount"] | null;
+            over_budget: boolean;
+            /** @description Righe dei rapportini approvati con dipendenti o mezzi senza costo orario. */
+            missing_hourly_costs: number;
+        };
+        HoursCost: {
+            /** @description Ore totali con due decimali. */
+            hours: string;
+            amount: components["schemas"]["Amount"];
+        };
+        /**
+         * @description photo: foto (JPEG, PNG, WebP). document: gli altri file.
+         * @enum {string}
+         */
+        SiteDocumentKind: "document" | "photo";
+        /** @description Le note si inviano comunque, con null se vuote. */
+        SiteDocumentInput: {
+            title: string;
+            notes: string | null;
+        };
+        SiteDocument: components["schemas"]["SiteDocumentInput"] & {
+            id: components["schemas"]["Id"];
+            site_id: components["schemas"]["Id"];
+            kind: components["schemas"]["SiteDocumentKind"];
+            file_name: string;
+            content_type: string;
+            /** @description Dimensione del file in byte. */
+            size: number;
+            /** @description Chi l'ha caricato; null se l'utente non c'è più. */
+            uploaded_by: components["schemas"]["UserRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SiteDocumentList: {
+            data: components["schemas"]["SiteDocument"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        Dashboard: {
+            today: components["schemas"]["Date"];
+            /** @description Numero di cantieri per stato. */
+            sites: {
+                planned: number;
+                active: number;
+                suspended: number;
+                completed: number;
+            } | null;
+            over_budget: components["schemas"]["DashboardOverBudgetSite"][] | null;
+            costs_this_month: {
+                /** @description Il mese in corso, AAAA-MM. */
+                month: string;
+                total: components["schemas"]["SignedAmount"];
+            } | null;
+            reports: {
+                /** @description Rapportini inviati, in attesa di approvazione. */
+                to_approve: number;
+                /** @description Rapportini in bozza di giorni passati, ancora da inviare. */
+                drafts: number;
+            } | null;
+            deadlines: components["schemas"]["DashboardDeadline"][] | null;
+        };
+        DashboardOverBudgetSite: {
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+            };
+            budget: components["schemas"]["SignedAmount"];
+            total: components["schemas"]["SignedAmount"];
+            /** @description Quanto i costi superano il budget. */
+            overrun: components["schemas"]["SignedAmount"];
+        };
+        DashboardDeadline: {
+            id: components["schemas"]["Id"];
+            title: string;
+            due_on: components["schemas"]["Date"];
+            kind: components["schemas"]["DeadlineKind"];
+            amount: components["schemas"]["SignedAmount"] | null;
+            overdue: boolean;
+        };
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        PriceListInput: {
+            /** @description Ad esempio «Prezzario regionale 2026» o «Prezzi interni». */
+            name: string;
+            year: number | null;
+            notes: string | null;
+        };
+        PriceList: components["schemas"]["PriceListInput"] & {
+            id: components["schemas"]["Id"];
+            item_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PriceListList: {
+            data: components["schemas"]["PriceList"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        PriceListItemInput: {
+            /** @description Codice della voce, ad esempio quello del prezzario regionale. */
+            code: string;
+            description: string;
+            /** @description Unità di misura, ad esempio m², m³, kg, cad. */
+            unit: string;
+            unit_price: components["schemas"]["Amount"];
+        };
+        PriceListItem: components["schemas"]["PriceListItemInput"] & {
+            id: components["schemas"]["Id"];
+            price_list_id: components["schemas"]["Id"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PriceListItemList: {
+            data: components["schemas"]["PriceListItem"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        SiteActivityInput: {
+            name: string;
+            start_on: components["schemas"]["Date"];
+            /** @description Ultimo giorno dell'attività, uguale o dopo start_on. */
+            end_on: components["schemas"]["Date"];
+            /** @description Avanzamento in percentuale. */
+            progress: number;
+            /**
+             * @description Attività dello stesso cantiere che devono finire prima che questa inizi (fine-inizio).
+             *     I doppioni si tolgono.
+             */
+            depends_on: components["schemas"]["Id"][];
+            notes: string | null;
+        };
+        SiteActivity: components["schemas"]["SiteActivityInput"] & {
+            id: components["schemas"]["Id"];
+            site_id: components["schemas"]["Id"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SiteActivityList: {
+            data: components["schemas"]["SiteActivity"][];
+        };
+        /**
+         * @description draft: bozza, si modifica. approved: approvato, non si modifica più.
+         * @enum {string}
+         */
+        ProgressStatementStatus: "draft" | "approved";
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        ProgressStatementInput: {
+            /** @description Data del SAL («lavori eseguiti a tutto il»). */
+            statement_date: components["schemas"]["Date"];
+            notes: string | null;
+            /** @description Una riga per voce del computo, senza doppioni. */
+            lines: {
+                item_id: components["schemas"]["Id"];
+                /** @description Quantità eseguita in questo SAL; negativa per una correzione. */
+                quantity: components["schemas"]["Quantity"];
+            }[];
+        };
+        ProgressStatementSummary: {
+            id: components["schemas"]["Id"];
+            estimate_id: components["schemas"]["Id"];
+            /** @description Numero progressivo del SAL nel computo. */
+            number: number;
+            statement_date: components["schemas"]["Date"];
+            status: components["schemas"]["ProgressStatementStatus"];
+            notes: string | null;
+            /** @description Importo dei lavori di questo SAL. */
+            amount: components["schemas"]["SignedAmount"];
+            /** @description Importo dei SAL precedenti. */
+            previous_amount: components["schemas"]["SignedAmount"];
+            /** @description Importo maturato a tutto questo SAL. */
+            cumulative_amount: components["schemas"]["SignedAmount"];
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ProgressStatementLine: {
+            item_id: components["schemas"]["Id"];
+            code: string | null;
+            description: string;
+            unit: string;
+            /** @description Prezzo usato in questo SAL (0.00 se la voce non ha righe in questo SAL). */
+            unit_price: components["schemas"]["Amount"];
+            /** @description Quantità attuale della voce nel computo. */
+            contract_quantity: components["schemas"]["Quantity"];
+            quantity: components["schemas"]["Quantity"];
+            previous_quantity: components["schemas"]["Quantity"];
+            cumulative_quantity: components["schemas"]["Quantity"];
+            amount: components["schemas"]["SignedAmount"];
+            previous_amount: components["schemas"]["SignedAmount"];
+            cumulative_amount: components["schemas"]["SignedAmount"];
+        };
+        ProgressStatement: components["schemas"]["ProgressStatementSummary"] & {
+            /** @description In ordine di codice e descrizione della voce. */
+            lines: components["schemas"]["ProgressStatementLine"][];
+        };
+        ProgressStatementList: {
+            data: components["schemas"]["ProgressStatementSummary"][];
+        };
+        SiteCostList: {
+            data: components["schemas"]["SiteCost"][];
+            meta: components["schemas"]["ListMeta"];
+            total_amount: components["schemas"]["Amount"];
+        };
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        EmployeeInput: {
+            first_name: string;
+            last_name: string;
+            /** @description Codice fiscale della persona (16 caratteri), unico nell'azienda. Si salva in maiuscolo, senza spazi. */
+            tax_code: string | null;
+            /** @description Mansione, ad esempio Muratore o Carpentiere. */
+            job_title: string | null;
+            phone: string | null;
+            /** Format: email */
+            email: string | null;
+            /** @description Data di assunzione. */
+            hired_on: components["schemas"]["Date"] | null;
+            /** @description Costo orario aziendale, per il costo della manodopera nei cantieri. */
+            hourly_cost: components["schemas"]["Amount"] | null;
+            /** @description false per chi non lavora più in azienda; resta nello storico. */
+            active: boolean;
+            notes: string | null;
+        };
+        Employee: components["schemas"]["EmployeeInput"] & {
             id: components["schemas"]["Id"];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        ClientList: {
-            data: components["schemas"]["Client"][];
+        EmployeeList: {
+            data: components["schemas"]["Employee"][];
             meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description vehicle: automezzo (furgone, autocarro). machine: macchina operatrice (escavatore, gru).
+         *     equipment: attrezzatura (betoniera, ponteggio, generatore).
+         * @enum {string}
+         */
+        VehicleKind: "vehicle" | "machine" | "equipment";
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        VehicleInput: {
+            name: string;
+            kind: components["schemas"]["VehicleKind"];
+            /** @description Targa, unica nell'azienda. Si salva in maiuscolo, senza spazi né trattini. */
+            plate: string | null;
+            /** @description Marca e modello. */
+            model: string | null;
+            /** @description Costo orario del mezzo, per i costi dei cantieri. */
+            hourly_cost: components["schemas"]["Amount"] | null;
+            /** @description false per un mezzo venduto o dismesso; resta nello storico. */
+            active: boolean;
+            notes: string | null;
+        };
+        Vehicle: components["schemas"]["VehicleInput"] & {
+            id: components["schemas"]["Id"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        VehicleList: {
+            data: components["schemas"]["Vehicle"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description draft: bozza. final: definitivo.
+         * @enum {string}
+         */
+        EstimateStatus: "draft" | "final";
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        EstimateInput: {
+            title: string;
+            client_id: components["schemas"]["Id"] | null;
+            /** @description Cantiere a cui appartiene il computo (scheda «Computo» del cantiere). */
+            site_id: components["schemas"]["Id"] | null;
+            /** @description Indirizzo del lavoro, in una riga. */
+            site_address: string | null;
+            status: components["schemas"]["EstimateStatus"];
+            notes: string | null;
+        };
+        Estimate: components["schemas"]["EstimateInput"] & {
+            id: components["schemas"]["Id"];
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+            } | null;
+            /** @description Totale del computo, somma degli importi delle voci. */
+            total: components["schemas"]["SignedAmount"];
+            client: components["schemas"]["SubjectRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        EstimateList: {
+            data: components["schemas"]["Estimate"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        EstimateChapterInput: {
+            code: string | null;
+            title: string;
+        };
+        EstimateChapterCreate: components["schemas"]["EstimateChapterInput"] & {
+            /** @description Capitolo che lo contiene, null per il primo livello. */
+            parent_id: components["schemas"]["Id"] | null;
+        };
+        EstimateChapter: components["schemas"]["EstimateChapterCreate"] & {
+            id: components["schemas"]["Id"];
+            /** @description Totale del capitolo, sottocapitoli compresi. */
+            amount: components["schemas"]["SignedAmount"];
+            /** @description Ordine tra i capitoli con lo stesso parent_id. */
+            position: number;
+            /** @description Lo stesso valore dell'ETag, da rimandare in If-Match. */
+            version: string;
+        };
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        EstimateItemInput: {
+            /** @description Codice della voce, ad esempio quello del prezzario regionale. */
+            code: string | null;
+            description: string;
+            /** @description Unità di misura, ad esempio m², m³, kg, cad. */
+            unit: string;
+            unit_price: components["schemas"]["Amount"];
+        };
+        EstimateItemCreate: components["schemas"]["EstimateItemInput"] & {
+            chapter_id: components["schemas"]["Id"];
+        };
+        EstimateItem: components["schemas"]["EstimateItemCreate"] & {
+            id: components["schemas"]["Id"];
+            /** @description Somma delle quantità delle righe di misura; 0.000 se non ce ne sono. */
+            quantity: components["schemas"]["Quantity"];
+            /** @description Quantità per prezzo unitario, arrotondato al centesimo. */
+            amount: components["schemas"]["SignedAmount"];
+            /** @description Ordine tra le voci dello stesso capitolo. */
+            position: number;
+            /** @description Lo stesso valore dell'ETag, da rimandare in If-Match. */
+            version: string;
+        };
+        EstimateStructure: {
+            /** @description Totale del computo. */
+            total: components["schemas"]["SignedAmount"];
+            measurements: components["schemas"]["EstimateMeasurement"][];
+            chapters: components["schemas"]["EstimateChapter"][];
+            items: components["schemas"]["EstimateItem"][];
+        };
+        /**
+         * @description Quantità come stringa con il punto e fino a tre decimali, mai numero JSON; può essere
+         *     negativa (detrazioni). In uscita ha sempre tre decimali.
+         * @example 12.500
+         * @example -2.000
+         */
+        Quantity: string;
+        /** @description Un fattore della riga di misura, al massimo 9 cifre intere; null se assente. */
+        MeasurementFactor: string | null;
+        /**
+         * @description I campi facoltativi si inviano comunque, con null se vuoti. Serve almeno un fattore.
+         *     La quantità è il prodotto dei fattori presenti, arrotondato a tre decimali.
+         */
+        EstimateMeasurementInput: {
+            description: string | null;
+            /** @description Parti uguali. */
+            equal_parts: components["schemas"]["MeasurementFactor"];
+            /** @description Lunghezza. */
+            length: components["schemas"]["MeasurementFactor"];
+            /** @description Larghezza. */
+            width: components["schemas"]["MeasurementFactor"];
+            /** @description Altezza o peso. */
+            height: components["schemas"]["MeasurementFactor"];
+        };
+        EstimateMeasurementCreate: components["schemas"]["EstimateMeasurementInput"] & {
+            item_id: components["schemas"]["Id"];
+        };
+        EstimateMeasurement: components["schemas"]["EstimateMeasurementCreate"] & {
+            id: components["schemas"]["Id"];
+            quantity: components["schemas"]["Quantity"];
+            /** @description Ordine tra le righe della stessa voce. */
+            position: number;
+            /** @description Lo stesso valore dell'ETag, da rimandare in If-Match. */
+            version: string;
+        };
+        EstimateArrangement: {
+            chapters: {
+                id: components["schemas"]["Id"];
+                parent_id: components["schemas"]["Id"] | null;
+            }[];
+            items: {
+                id: components["schemas"]["Id"];
+                chapter_id: components["schemas"]["Id"];
+            }[];
+        };
+        /**
+         * @description Dati fiscali dell'azienda. Per le aziende italiane si controllano partita IVA, codice
+         *     fiscale, CAP e provincia. I campi facoltativi si inviano comunque, con null se vuoti.
+         */
+        CompanyProfileInput: {
+            /** @description Ragione sociale. */
+            legal_name: string;
+            vat_number: string | null;
+            tax_code: string | null;
+            /** @description Numero REA, ad esempio TO-1234567. */
+            rea: string | null;
+            /** @description Capitale sociale versato, per le società. */
+            share_capital: components["schemas"]["Amount"] | null;
+            street: string | null;
+            postal_code: string | null;
+            city: string | null;
+            province: string | null;
+            country: string;
+            phone: string | null;
+            email: string | null;
+            pec: string | null;
+            /** @description Conto per i pagamenti, stampato nelle condizioni. Gli spazi si tolgono. */
+            iban: string | null;
+        };
+        CompanyProfile: components["schemas"]["CompanyProfileInput"] & {
+            /**
+             * Format: date-time
+             * @description Null se i dati non sono mai stati salvati.
+             */
+            updated_at: string | null;
+        };
+        Numbering: {
+            quotes: {
+                year: number;
+                next_number: number;
+                /** @description Il prossimo numero come verrà stampato, ad esempio 2026/046. */
+                next: string;
+            };
+        };
+        /**
+         * @description draft: bozza. sent: inviato. accepted: accettato. rejected: rifiutato. expired: scaduto.
+         * @enum {string}
+         */
+        QuoteStatus: "draft" | "sent" | "accepted" | "rejected" | "expired";
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        QuoteInput: {
+            client_id: components["schemas"]["Id"];
+            /** @description Oggetto del preventivo. */
+            subject: string;
+            /** @description Giorni di validità dalla data del preventivo. */
+            validity_days: number;
+            notes: string | null;
+            /** @description Condizioni (pagamento, tempi, esclusioni). */
+            terms: string | null;
+        };
+        Quote: components["schemas"]["QuoteInput"] & {
+            id: components["schemas"]["Id"];
+            totals: components["schemas"]["QuoteTotals"];
+            client: components["schemas"]["SubjectRef"];
+            status: components["schemas"]["QuoteStatus"];
+            /**
+             * @description Numero progressivo dell'anno, ad esempio 2026/001; le revisioni hanno lo stesso
+             *     numero con la revisione in fondo (2026/001-R1). Null in bozza.
+             */
+            number: string | null;
+            /** @description 0 per il preventivo originale, 1, 2… per le revisioni; null in bozza. */
+            revision: number | null;
+            /** @description Il preventivo da cui nasce questa revisione; null per un originale. */
+            revision_of: components["schemas"]["QuoteRef"] | null;
+            /** @description Data del preventivo, quella del primo invio; null in bozza. */
+            issue_date: components["schemas"]["Date"] | null;
+            /** @description Data più validity_days; null in bozza. */
+            valid_until: components["schemas"]["Date"] | null;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        QuoteRef: {
+            id: components["schemas"]["Id"];
+            number: string | null;
+        };
+        QuoteList: {
+            data: components["schemas"]["Quote"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description item: riga con prezzo. text: solo testo. section: titolo di sezione.
+         * @enum {string}
+         */
+        QuoteLineKind: "item" | "text" | "section";
+        /**
+         * @description Aliquota IVA in percentuale.
+         * @enum {integer}
+         */
+        VatRate: 22 | 10 | 5 | 4 | 0;
+        /**
+         * @description Per le righe item servono unit, quantity, unit_price, discount_percent e vat_rate; per
+         *     text e section vanno inviati null. I campi si inviano sempre tutti.
+         */
+        QuoteLineInput: {
+            kind: components["schemas"]["QuoteLineKind"];
+            description: string;
+            unit: string | null;
+            quantity: string | null;
+            unit_price: components["schemas"]["Amount"] | null;
+            /** @description Sconto in percentuale, da 0 a 100, fino a due decimali. */
+            discount_percent: string | null;
+            vat_rate: components["schemas"]["VatRate"] | null;
+        };
+        QuoteLine: components["schemas"]["QuoteLineInput"] & {
+            id: components["schemas"]["Id"];
+            /**
+             * @description Imponibile della riga: quantità × prezzo × (1 − sconto), arrotondato al
+             *     centesimo. Null per text e section.
+             */
+            amount: components["schemas"]["SignedAmount"] | null;
+            position: number;
+            /** @description Lo stesso valore dell'ETag, da rimandare in If-Match. */
+            version: string;
+        };
+        QuoteLineList: {
+            data: components["schemas"]["QuoteLine"][];
+        };
+        /**
+         * @description Calcolati dal backend in centesimi. L'imponibile è la somma degli imponibili di riga;
+         *     l'IVA si calcola per aliquota sull'imponibile di quell'aliquota, arrotondata al
+         *     centesimo; il totale è imponibile più IVA.
+         */
+        QuoteTotals: {
+            taxable: components["schemas"]["SignedAmount"];
+            /** @description Una voce per aliquota presente nelle righe, dalla più alta. */
+            vat: {
+                rate: components["schemas"]["VatRate"];
+                taxable: components["schemas"]["SignedAmount"];
+                vat: components["schemas"]["SignedAmount"];
+            }[];
+            vat_total: components["schemas"]["SignedAmount"];
+            total: components["schemas"]["SignedAmount"];
+        };
+        QuoteFromEstimateInput: components["schemas"]["QuoteInput"] & {
+            vat_rate: components["schemas"]["VatRate"];
         };
     };
     responses: {
@@ -260,7 +4149,10 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description Azione non permessa dal ruolo dell'utente in questa azienda. */
+        /**
+         * @description Azione non permessa dal ruolo dell'utente in questa azienda, oppure token CSRF mancante
+         *     o non valido (code csrf_invalid: il frontend rinnova il token e riprova una volta).
+         */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
@@ -287,6 +4179,40 @@ export interface components {
                 "application/json": components["schemas"]["ValidationError"];
             };
         };
+        /**
+         * @description Il record è stato modificato da qualcun altro dopo che l'utente l'ha aperto
+         *     (code stale_record). Niente viene cambiato.
+         */
+        StaleRecord: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Manca l'header If-Match (code precondition_required). */
+        PreconditionRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description Cambio rifiutato: lascerebbe l'azienda senza utenti attivi con users.manage o con
+         *     roles.manage, se prima qualcuno li aveva (code last_manager), oppure è la
+         *     disattivazione di sé stessi (code self_deactivation).
+         */
+        LastManager: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description Troppi tentativi in poco tempo. */
         TooManyRequests: {
             headers: {
@@ -304,15 +4230,76 @@ export interface components {
         Company: components["schemas"]["Slug"];
         Page: number;
         PerPage: number;
+        ClientId: components["schemas"]["Id"];
+        SupplierId: components["schemas"]["Id"];
+        DeadlineId: components["schemas"]["Id"];
+        SiteId: components["schemas"]["Id"];
+        PriceListId: components["schemas"]["Id"];
+        PriceListItemId: components["schemas"]["Id"];
+        SiteActivityId: components["schemas"]["Id"];
+        ProgressStatementId: components["schemas"]["Id"];
+        SiteDocumentId: components["schemas"]["Id"];
+        WarehouseItemId: components["schemas"]["Id"];
+        WarehouseMovementId: components["schemas"]["Id"];
+        PurchaseOrderId: components["schemas"]["Id"];
+        SiteCostId: components["schemas"]["Id"];
+        DailyReportId: components["schemas"]["Id"];
+        EmployeeId: components["schemas"]["Id"];
+        VehicleId: components["schemas"]["Id"];
+        EstimateId: components["schemas"]["Id"];
+        ChapterId: components["schemas"]["Id"];
+        ItemId: components["schemas"]["Id"];
+        MeasurementId: components["schemas"]["Id"];
+        QuoteId: components["schemas"]["Id"];
+        LineId: components["schemas"]["Id"];
+        UserId: components["schemas"]["Id"];
+        InvitationToken: string;
+        /** @description ETag della versione che l'utente ha davanti. */
+        IfMatch: string;
         /** @description Testo libero; il backend decide su quali campi cercare. */
         Search: string;
     };
     requestBodies: never;
-    headers: never;
+    headers: {
+        /** @description Versione del record, da rimandare in If-Match quando lo si modifica. */
+        ETag: string;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il servizio funziona */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "ok";
+                    };
+                };
+            };
+            /** @description Il database non risponde */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getCsrfCookie: {
         parameters: {
             query?: never;
@@ -351,8 +4338,60 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationFailed"];
             429: components["responses"]["TooManyRequests"];
+        };
+    };
+    requestPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequestInput"];
+            };
+        };
+        responses: {
+            /** @description Richiesta ricevuta */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    resetPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetInput"];
+            };
+        };
+        responses: {
+            /** @description Password cambiata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
         };
     };
     logout: {
@@ -372,6 +4411,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getMe: {
@@ -395,6 +4435,59 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    updateMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Profilo aggiornato */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    changePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordChangeInput"];
+            };
+        };
+        responses: {
+            /** @description Password cambiata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationFailed"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
     listClients: {
         parameters: {
             query?: {
@@ -404,9 +4497,14 @@ export interface operations {
                 search?: components["parameters"]["Search"];
                 /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
                 sort?: "name" | "-name" | "created_at" | "-created_at";
-                /** @description Filtri, ad esempio filter[kind]=company. */
+                /**
+                 * @description Filtri, ad esempio filter[kind]=company. filter[archived]=true mostra solo i clienti
+                 *     archiviati; senza il filtro, o con false, solo quelli attivi.
+                 */
                 filter?: {
                     kind?: components["schemas"]["ClientKind"];
+                    /** @default false */
+                    archived?: boolean;
                 };
             };
             header?: never;
@@ -430,6 +4528,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
         };
     };
     createClient: {
@@ -451,10 +4550,49 @@ export interface operations {
             /** @description Cliente creato */
             201: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Client"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportClients: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "name" | "-name" | "created_at" | "-created_at";
+                filter?: {
+                    kind?: components["schemas"]["ClientKind"];
+                    /** @default false */
+                    archived?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -479,6 +4617,7 @@ export interface operations {
             /** @description Il cliente */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -492,7 +4631,10 @@ export interface operations {
     updateClient: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description ETag della versione che l'utente sta modificando. */
+                "If-Match": string;
+            };
             path: {
                 /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
                 company: components["parameters"]["Company"];
@@ -509,6 +4651,7 @@ export interface operations {
             /** @description Cliente aggiornato */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -518,7 +4661,5360 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il cliente è stato modificato da qualcun altro dopo che l'utente l'ha aperto. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["ValidationFailed"];
+            /** @description Manca l'header If-Match. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteClient: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cliente eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il cliente ha documenti collegati (code has_documents). Si può archiviare. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    archiveClient: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cliente archiviato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Client"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    restoreClient: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cliente di nuovo attivo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Client"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listSuppliers: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "name" | "-name" | "created_at" | "-created_at";
+                /**
+                 * @description Filtri, ad esempio filter[category]=rentals o filter[subcontractor]=true.
+                 *     filter[archived]=true mostra solo i fornitori archiviati; senza il filtro, o con
+                 *     false, solo quelli attivi.
+                 */
+                filter?: {
+                    category?: components["schemas"]["SupplierCategory"];
+                    subcontractor?: boolean;
+                    /** @default false */
+                    archived?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di fornitori */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createSupplier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierInput"];
+            };
+        };
+        responses: {
+            /** @description Fornitore creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Supplier"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportSuppliers: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "name" | "-name" | "created_at" | "-created_at";
+                filter?: {
+                    category?: components["schemas"]["SupplierCategory"];
+                    subcontractor?: boolean;
+                    /** @default false */
+                    archived?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getSupplier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il fornitore */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Supplier"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSupplier: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierInput"];
+            };
+        };
+        responses: {
+            /** @description Fornitore aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Supplier"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteSupplier: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fornitore eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il fornitore ha documenti collegati (code has_documents). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    archiveSupplier: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fornitore archiviato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Supplier"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    restoreSupplier: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fornitore di nuovo attivo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Supplier"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listSupplierDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I documenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierDocumentList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createSupplierDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierDocumentInput"];
+            };
+        };
+        responses: {
+            /** @description Documento registrato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateSupplierDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierDocumentInput"];
+            };
+        };
+        responses: {
+            /** @description Documento aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteSupplierDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Documento eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listDeadlines: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                /** @description Ordinamento per data di scadenza; il segno meno vuol dire decrescente. */
+                sort?: "due_on" | "-due_on";
+                /**
+                 * @description Filtri, ad esempio filter[from]=2026-11-01&filter[to]=2026-11-30&filter[status]=open.
+                 *     filter[client] e filter[supplier] prendono l'id del soggetto.
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    kind?: components["schemas"]["DeadlineKind"];
+                    status?: components["schemas"]["DeadlineStatus"];
+                    client?: components["schemas"]["Id"];
+                    supplier?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di scadenze */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadlineList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createDeadline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeadlineInput"];
+            };
+        };
+        responses: {
+            /** @description Scadenza creata */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deadline"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportDeadlines: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "due_on" | "-due_on";
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    kind?: components["schemas"]["DeadlineKind"];
+                    status?: components["schemas"]["DeadlineStatus"];
+                    client?: components["schemas"]["Id"];
+                    supplier?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getDeadlineSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il riepilogo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadlineSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getDeadline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                deadline: components["parameters"]["DeadlineId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description La scadenza */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deadline"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateDeadline: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                deadline: components["parameters"]["DeadlineId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeadlineInput"];
+            };
+        };
+        responses: {
+            /** @description Scadenza aggiornata */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deadline"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteDeadline: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                deadline: components["parameters"]["DeadlineId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scadenza eliminata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    completeDeadline: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                deadline: components["parameters"]["DeadlineId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scadenza segnata come fatta */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deadline"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    reopenDeadline: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                deadline: components["parameters"]["DeadlineId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scadenza di nuovo aperta */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deadline"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listSites: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "name" | "-name" | "code" | "-code" | "start_on" | "-start_on" | "updated_at" | "-updated_at";
+                /** @description Filtri, ad esempio filter[status]=active o filter[client]=<id>. */
+                filter?: {
+                    status?: components["schemas"]["SiteStatus"];
+                    client?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di cantieri */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createSite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteInput"];
+            };
+        };
+        responses: {
+            /** @description Cantiere creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Site"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportSites: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "name" | "-name" | "code" | "-code" | "start_on" | "-start_on" | "updated_at" | "-updated_at";
+                filter?: {
+                    status?: components["schemas"]["SiteStatus"];
+                    client?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getSite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il cantiere */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Site"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSite: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteInput"];
+            };
+        };
+        responses: {
+            /** @description Cantiere aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Site"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteSite: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cantiere eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /**
+             * @description Il cantiere ha rapportini, costi, documenti o computi collegati (code has_documents).
+             *     Si può chiudere.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getSiteTeam: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description La squadra */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteTeam"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    replaceSiteTeam: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteTeamInput"];
+            };
+        };
+        responses: {
+            /** @description La squadra aggiornata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteTeam"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listDailyReports: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "date" | "-date" | "updated_at" | "-updated_at";
+                /**
+                 * @description Filtri, ad esempio filter[site]=<id>, filter[status]=submitted,
+                 *     filter[from]=2026-11-01 e filter[to]=2026-11-30 (estremi compresi).
+                 */
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di rapportini */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReportList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createDailyReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DailyReportInput"];
+            };
+        };
+        responses: {
+            /** @description Rapportino creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReport"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getTodayDailyReport: {
+        parameters: {
+            query: {
+                site: components["schemas"]["Id"];
+                date?: components["schemas"]["Date"];
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il rapportino del giorno o la proposta */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReportToday"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getDailyReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                report: components["parameters"]["DailyReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il rapportino */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReport"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateDailyReport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                report: components["parameters"]["DailyReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DailyReportInput"];
+            };
+        };
+        responses: {
+            /** @description Rapportino aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReport"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il rapportino non è in bozza (code report_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteDailyReport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                report: components["parameters"]["DailyReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rapportino eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il rapportino non è in bozza (code report_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    changeDailyReportStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                report: components["parameters"]["DailyReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    status: components["schemas"]["DailyReportStatus"];
+                };
+            };
+        };
+        responses: {
+            /** @description Stato cambiato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReport"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Passaggio di stato non ammesso (code invalid_transition). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listSiteCosts: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "date" | "-date" | "amount" | "-amount";
+                /**
+                 * @description Filtri, ad esempio filter[site]=<id>, filter[category]=materials,
+                 *     filter[supplier]=<id>, filter[from]=2026-11-01 e filter[to]=2026-11-30.
+                 */
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    supplier?: components["schemas"]["Id"];
+                    category?: components["schemas"]["CostCategory"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di costi */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteCostList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createSiteCost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteCostInput"];
+            };
+        };
+        responses: {
+            /** @description Costo registrato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteCost"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getSiteCost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                cost: components["parameters"]["SiteCostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il costo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteCost"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSiteCost: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                cost: components["parameters"]["SiteCostId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteCostInput"];
+            };
+        };
+        responses: {
+            /** @description Costo aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteCost"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteSiteCost: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                cost: components["parameters"]["SiteCostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Costo eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listPurchaseOrders: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "date" | "-date" | "number" | "-number" | "total" | "-total";
+                /**
+                 * @description Filtri, ad esempio filter[supplier]=<id>, filter[site]=<id>, filter[status]=sent,
+                 *     filter[from]=2026-11-01 e filter[to]=2026-11-30 (sulla data dell'ordine).
+                 */
+                filter?: {
+                    supplier?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                    status?: components["schemas"]["PurchaseOrderStatus"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di ordini */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createPurchaseOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseOrderInput"];
+            };
+        };
+        responses: {
+            /** @description Ordine creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrder"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getPurchaseOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description L'ordine */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrder"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updatePurchaseOrder: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseOrderInput"];
+            };
+        };
+        responses: {
+            /** @description Ordine aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrder"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description L'ordine non è in bozza (code order_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deletePurchaseOrder: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ordine eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description L'ordine non è in bozza (code order_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    changePurchaseOrderStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    status: components["schemas"]["PurchaseOrderStatus"];
+                };
+            };
+        };
+        responses: {
+            /** @description Stato cambiato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrder"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /**
+             * @description Passaggio di stato non ammesso (code invalid_transition) o ordine già caricato in
+             *     magazzino (code has_documents).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    loadPurchaseOrderIntoWarehouse: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    date: components["schemas"]["Date"];
+                    lines: {
+                        item_id: components["schemas"]["Id"];
+                        /** @description Quantità maggiore di zero, nell'unità dell'articolo. */
+                        quantity: components["schemas"]["Quantity"];
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Movimenti di carico registrati */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WarehouseMovement"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description L'ordine non è ricevuto (code invalid_transition). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listWarehouseItems: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "name" | "-name" | "code" | "-code" | "stock" | "-stock";
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di articoli */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarehouseItemList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createWarehouseItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WarehouseItemInput"];
+            };
+        };
+        responses: {
+            /** @description Articolo creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarehouseItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getWarehouseItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                item: components["parameters"]["WarehouseItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description L'articolo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarehouseItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateWarehouseItem: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                item: components["parameters"]["WarehouseItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WarehouseItemInput"];
+            };
+        };
+        responses: {
+            /** @description Articolo aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarehouseItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteWarehouseItem: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                item: components["parameters"]["WarehouseItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Articolo eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description L'articolo ha movimenti (code has_documents). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listWarehouseMovements: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /**
+                 * @description Filtri, ad esempio filter[item]=<id>, filter[site]=<id>, filter[kind]=out,
+                 *     filter[from]=2026-11-01 e filter[to]=2026-11-30.
+                 */
+                filter?: {
+                    item?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                    kind?: components["schemas"]["WarehouseMovementKind"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di movimenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarehouseMovementList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createWarehouseMovement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WarehouseMovementInput"];
+            };
+        };
+        responses: {
+            /** @description Movimento registrato */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarehouseMovement"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    deleteWarehouseMovement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                movement: components["parameters"]["WarehouseMovementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Movimento eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getSiteCostSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il riepilogo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteCostSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listSiteDocuments: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Filtri, ad esempio filter[kind]=photo per la scheda delle foto. */
+                filter?: {
+                    kind?: components["schemas"]["SiteDocumentKind"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di documenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDocumentList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    uploadSiteDocument: {
+        parameters: {
+            query: {
+                /** @description Nome originale del file; si tiene solo l'ultima parte del percorso. */
+                file_name: string;
+                title?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/pdf": string;
+                "image/jpeg": string;
+                "image/png": string;
+                "image/webp": string;
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": string;
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
+            };
+        };
+        responses: {
+            /** @description File caricato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File più grande di 20 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tipo di file non ammesso. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getSiteDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+                document: components["parameters"]["SiteDocumentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il documento, senza il file */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSiteDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+                document: components["parameters"]["SiteDocumentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteDocumentInput"];
+            };
+        };
+        responses: {
+            /** @description Documento aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteSiteDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+                document: components["parameters"]["SiteDocumentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Documento eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getSiteDocumentContent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+                document: components["parameters"]["SiteDocumentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": string;
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gli indicatori */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dashboard"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listSiteActivities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le attività */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteActivityList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createSiteActivity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteActivityInput"];
+            };
+        };
+        responses: {
+            /** @description Attività creata */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteActivity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateSiteActivity: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+                activity: components["parameters"]["SiteActivityId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteActivityInput"];
+            };
+        };
+        responses: {
+            /** @description Attività aggiornata */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteActivity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteSiteActivity: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+                activity: components["parameters"]["SiteActivityId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Attività eliminata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listProgressStatements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I SAL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressStatementList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createProgressStatement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProgressStatementInput"];
+            };
+        };
+        responses: {
+            /** @description SAL creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressStatement"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description C'è già un SAL in bozza (code statement_draft_exists). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getProgressStatement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il SAL */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressStatement"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateProgressStatement: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProgressStatementInput"];
+            };
+        };
+        responses: {
+            /** @description SAL aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressStatement"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il SAL è già approvato (code statement_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteProgressStatement: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SAL eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il SAL è già approvato (code statement_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    approveProgressStatement: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SAL approvato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressStatement"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il SAL è già approvato (code statement_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listPriceLists: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Cerca nel nome. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di prezzari */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceListList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createPriceList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceListInput"];
+            };
+        };
+        responses: {
+            /** @description Prezzario creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getPriceList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il prezzario */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updatePriceList: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceListInput"];
+            };
+        };
+        responses: {
+            /** @description Prezzario aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deletePriceList: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prezzario eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listPriceListItems: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Cerca nel codice e nella descrizione. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di voci */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceListItemList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createPriceListItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceListItemInput"];
+            };
+        };
+        responses: {
+            /** @description Voce creata */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceListItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updatePriceListItem: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+                item: components["parameters"]["PriceListItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceListItemInput"];
+            };
+        };
+        responses: {
+            /** @description Voce aggiornata */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceListItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deletePriceListItem: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+                item: components["parameters"]["PriceListItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Voce eliminata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listEmployees: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "last_name" | "-last_name" | "hired_on" | "-hired_on" | "updated_at" | "-updated_at";
+                /** @description Filtri: filter[active]=true solo gli attivi, false solo i cessati; senza filtro tutti. */
+                filter?: {
+                    active?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di dipendenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createEmployee: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmployeeInput"];
+            };
+        };
+        responses: {
+            /** @description Dipendente creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Employee"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportEmployees: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "last_name" | "-last_name" | "hired_on" | "-hired_on" | "updated_at" | "-updated_at";
+                filter?: {
+                    active?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getEmployee: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il dipendente */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Employee"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateEmployee: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmployeeInput"];
+            };
+        };
+        responses: {
+            /** @description Dipendente aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Employee"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteEmployee: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dipendente eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il dipendente è in una squadra o ha documenti collegati (code has_documents). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listVehicles: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "name" | "-name" | "updated_at" | "-updated_at";
+                /** @description Filtri: filter[kind]=machine; filter[active]=true solo i mezzi in uso, false solo i dismessi. */
+                filter?: {
+                    kind?: components["schemas"]["VehicleKind"];
+                    active?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di mezzi */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createVehicle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VehicleInput"];
+            };
+        };
+        responses: {
+            /** @description Mezzo creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vehicle"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportVehicles: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "name" | "-name" | "updated_at" | "-updated_at";
+                filter?: {
+                    kind?: components["schemas"]["VehicleKind"];
+                    active?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getVehicle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il mezzo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vehicle"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateVehicle: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VehicleInput"];
+            };
+        };
+        responses: {
+            /** @description Mezzo aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vehicle"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteVehicle: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Mezzo eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il mezzo compare in un rapportino (code has_documents). Si può segnare come non in uso. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listEstimates: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "title" | "-title" | "created_at" | "-created_at" | "updated_at" | "-updated_at";
+                /** @description Filtri, ad esempio filter[status]=draft, filter[client]=<id> o filter[site]=<id>. */
+                filter?: {
+                    status?: components["schemas"]["EstimateStatus"];
+                    client?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di computi */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createEstimate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateInput"];
+            };
+        };
+        responses: {
+            /** @description Computo creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Estimate"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportEstimates: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "title" | "-title" | "created_at" | "-created_at" | "updated_at" | "-updated_at";
+                filter?: {
+                    status?: components["schemas"]["EstimateStatus"];
+                    client?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getEstimate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il computo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Estimate"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateEstimate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateInput"];
+            };
+        };
+        responses: {
+            /** @description Computo aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Estimate"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteEstimate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Computo eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il computo ha dei SAL (code has_documents). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    duplicateEstimate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description La copia */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Estimate"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createQuoteFromEstimate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteFromEstimateInput"];
+            };
+        };
+        responses: {
+            /** @description Preventivo creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getEstimateStructure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description La struttura del computo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateStructure"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    arrangeEstimateStructure: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateArrangement"];
+            };
+        };
+        responses: {
+            /** @description La struttura dopo lo spostamento */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateStructure"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    createEstimateChapter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateChapterCreate"];
+            };
+        };
+        responses: {
+            /** @description Creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateChapter"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateEstimateChapter: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                chapter: components["parameters"]["ChapterId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateChapterInput"];
+            };
+        };
+        responses: {
+            /** @description Aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateChapter"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteEstimateChapter: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                chapter: components["parameters"]["ChapterId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il capitolo contiene voci presenti in un SAL (code has_documents). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    createEstimateItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateItemCreate"];
+            };
+        };
+        responses: {
+            /** @description Creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createEstimateItemFromPriceList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    chapter_id: components["schemas"]["Id"];
+                    price_list_item_id: components["schemas"]["Id"];
+                };
+            };
+        };
+        responses: {
+            /** @description Creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateEstimateItem: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                item: components["parameters"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateItemInput"];
+            };
+        };
+        responses: {
+            /** @description Aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteEstimateItem: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                item: components["parameters"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description La voce compare in un SAL (code has_documents). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    createEstimateMeasurement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateMeasurementCreate"];
+            };
+        };
+        responses: {
+            /** @description Creata */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateMeasurement"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateEstimateMeasurement: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                measurement: components["parameters"]["MeasurementId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateMeasurementInput"];
+            };
+        };
+        responses: {
+            /** @description Aggiornata */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateMeasurement"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteEstimateMeasurement: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                measurement: components["parameters"]["MeasurementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Eliminata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getCompanyProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I dati dell'azienda */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyProfile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateCompanyProfile: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanyProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Dati aggiornati */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyProfile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getNumbering: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le numerazioni */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Numbering"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setQuoteNumbering: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    year: number;
+                    next_number: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Numerazione aggiornata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Numbering"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il numero è già stato usato in quell'anno (code number_in_use). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getCompanyLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il logo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setCompanyLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/png": string;
+                "image/jpeg": string;
+            };
+        };
+        responses: {
+            /** @description Logo salvato */
+            204: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File più grande di 512 KB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Content-Type diverso da image/png e image/jpeg. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    deleteCompanyLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Logo eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I ruoli */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleInput"];
+            };
+        };
+        responses: {
+            /** @description Ruolo creato */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Role"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                role: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleInput"];
+            };
+        };
+        responses: {
+            /** @description Ruolo aggiornato */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Role"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["LastManager"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    deleteRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                role: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ruolo eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il ruolo è assegnato ad almeno un utente (code role_in_use). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listAuditLog: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Filtri, ad esempio filter[entity]=client&filter[entity_id]=<id>. */
+                filter?: {
+                    entity?: components["schemas"]["AuditEntity"];
+                    entity_id?: components["schemas"]["Id"];
+                    user?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina del registro */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listCompanyUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gli utenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyUserList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    changeUserRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                user: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserRoleInput"];
+            };
+        };
+        responses: {
+            /** @description Ruolo cambiato */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["LastManager"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    deactivateUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                user: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Utente disattivato */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["LastManager"];
+        };
+    };
+    reactivateUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                user: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Utente riattivato */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gli inviti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationInput"];
+            };
+        };
+        responses: {
+            /** @description Invito creato */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationCreated"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description L'email è già di un membro dell'azienda (code already_member). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    deleteInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invitation: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invito annullato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["InvitationToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description L'invito */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationPreview"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    acceptInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["InvitationToken"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationAcceptInput"];
+            };
+        };
+        responses: {
+            /** @description Invito accettato, sessione aperta */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description L'utente fa già parte dell'azienda (code already_member). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    listQuotes: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "number" | "-number" | "issue_date" | "-issue_date" | "updated_at" | "-updated_at";
+                /** @description Filtri, ad esempio filter[status]=sent o filter[client]=<id>. */
+                filter?: {
+                    status?: components["schemas"]["QuoteStatus"];
+                    client?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di preventivi */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createQuote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteInput"];
+            };
+        };
+        responses: {
+            /** @description Preventivo creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportQuotes: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "number" | "-number" | "issue_date" | "-issue_date" | "updated_at" | "-updated_at";
+                filter?: {
+                    status?: components["schemas"]["QuoteStatus"];
+                    client?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getQuote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il preventivo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateQuote: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteInput"];
+            };
+        };
+        responses: {
+            /** @description Preventivo aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il preventivo non è più in bozza (code quote_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteQuote: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Preventivo eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il preventivo non è più in bozza (code quote_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    sendQuote: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Preventivo inviato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il preventivo non è più in bozza (code quote_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    changeQuoteStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    status: "sent" | "accepted" | "rejected" | "expired";
+                };
+            };
+        };
+        responses: {
+            /** @description Stato cambiato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Passaggio di stato non ammesso (code invalid_transition). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getQuotePdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il PDF */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    reviseQuote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description La revisione in bozza */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il preventivo è in bozza o accettato e non si rivede (code invalid_transition). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listQuoteLines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le righe */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteLineList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createQuoteLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteLineInput"];
+            };
+        };
+        responses: {
+            /** @description Riga creata */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteLine"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il preventivo non è più in bozza (code quote_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateQuoteLine: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+                line: components["parameters"]["LineId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteLineInput"];
+            };
+        };
+        responses: {
+            /** @description Riga aggiornata */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteLine"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il preventivo non è più in bozza (code quote_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteQuoteLine: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag della versione che l'utente ha davanti. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+                line: components["parameters"]["LineId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Riga eliminata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il preventivo non è più in bozza (code quote_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
         };
     };
 }
