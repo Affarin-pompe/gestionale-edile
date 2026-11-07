@@ -47,7 +47,12 @@ export const menu: MenuGroup[] = [
   {
     label: 'menu.admin',
     items: [
-      { label: 'menu.deadlines', icon: CalendarClock, path: 'scadenziario', soon: true },
+      {
+        label: 'menu.deadlines',
+        icon: CalendarClock,
+        path: 'scadenziario',
+        permission: 'deadlines.view',
+      },
       { label: 'menu.costs', icon: Wallet, path: 'costi', soon: true },
     ],
   },

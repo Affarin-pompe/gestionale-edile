@@ -5,6 +5,7 @@ import { NoCompanyPage } from '@/auth/NoCompanyPage'
 import { homeLoader, loginAction, logoutAction, requireAuth, requireCompany } from '@/auth/session'
 import { AppLayout } from '@/layouts/AppLayout'
 import { clientRoutes } from '@/features/clients/routes'
+import { deadlineRoutes } from '@/features/deadlines/routes'
 import { employeeRoutes } from '@/features/employees/routes'
 import { supplierRoutes } from '@/features/suppliers/routes'
 import { vehicleRoutes } from '@/features/vehicles/routes'
@@ -45,6 +46,7 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                   children: [
                     { index: true, Component: HomePage },
                     ...clientRoutes(queryClient),
+                    ...deadlineRoutes(queryClient),
                     ...supplierRoutes(queryClient),
                     ...employeeRoutes(queryClient),
                     ...vehicleRoutes(queryClient),
