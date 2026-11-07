@@ -10,6 +10,7 @@ import { reportRoutes } from '@/features/daily-reports/routes'
 import { dashboardRoutes } from '@/features/dashboard/routes'
 import { estimateRoutes } from '@/features/estimates/routes'
 import { quoteRoutes } from '@/features/quotes/routes'
+import { siteRoutes } from '@/features/sites/routes'
 import { deadlineRoutes } from '@/features/deadlines/routes'
 import { employeeRoutes } from '@/features/employees/routes'
 import { supplierRoutes } from '@/features/suppliers/routes'
@@ -52,6 +53,7 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                     ...clientRoutes(queryClient),
                     ...quoteRoutes(queryClient),
                     ...estimateRoutes(queryClient),
+                    ...siteRoutes(queryClient),
                     ...reportRoutes(queryClient),
                     ...deadlineRoutes(queryClient),
                     ...costRoutes(queryClient),

@@ -3,7 +3,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it } from 'vitest'
 import type { Me } from '@/auth/me'
-import { messages, type MessageId } from '@/i18n/it'
+import { messages } from '@/i18n/it'
 import { server } from '@/mocks/node'
 import {
   linkOutsideBreadcrumbs,
@@ -64,14 +64,12 @@ function menuGroups(root: ParentNode = document) {
     Array.from(group.querySelectorAll('[data-sidebar="menu-item"]'), (item) => item.textContent),
   ])
 }
-/** A planned module as the menu shows it: its name and "Presto". */
-const soon = (id: MessageId) => `${T[id]}${T['menu.soon']}`
 // Built modules need permissions the mock users do not have, so they are hidden
 const PLANNED_REGISTRY: string[] = []
 const menuWith = (
   registry: (string | null)[],
   admin: string[] = [T['menu.deadlines'], T['menu.costs']],
-  work: string[] = [soon('menu.sites'), T['menu.reports']],
+  work: string[] = [T['menu.sites'], T['menu.reports']],
 ) =>
   (
     [
@@ -250,8 +248,8 @@ describe('side menu', () => {
 
     expect(menuLink(DASHBOARD)).toBeTruthy()
     expect(queryMenuLink(CLIENTS)).toBeNull()
-    // Without companies' permissions: no Scadenziario, Costi or Rapportini either
-    expect(menuGroups()).toEqual(menuWith(PLANNED_REGISTRY, [], [soon('menu.sites')]))
+    // Without companies' permissions: no Scadenziario, Costi, Cantieri or Rapportini either
+    expect(menuGroups()).toEqual(menuWith(PLANNED_REGISTRY, [], []))
   })
 
   it.each([
@@ -263,12 +261,12 @@ describe('side menu', () => {
     await waitFor(() => menuLink(DASHBOARD))
 
     const planned = plannedItems()
-    expect(planned).toHaveLength(1)
+    expect(planned).toHaveLength(0)
     for (const item of planned) {
       expect(within(item as HTMLElement).getByText(T['menu.soon'])).toBeTruthy()
       expect(item.querySelector('a, button, [href], [tabindex]')).toBeNull()
     }
-    for (const id of ['menu.quotes', 'menu.sites'] as const) {
+    for (const id of ['menu.quotes'] as const) {
       expect(screen.queryByRole('link', { name: new RegExp(T[id]) })).toBeNull()
     }
   })

@@ -40,7 +40,7 @@ export const menu: MenuGroup[] = [
     items: [
       { label: 'menu.quotes', icon: FileText, path: 'preventivi', permission: 'quotes.view' },
       { label: 'menu.estimates', icon: Ruler, path: 'computi', permission: 'estimates.view' },
-      { label: 'menu.sites', icon: Construction, path: 'cantieri', soon: true },
+      { label: 'menu.sites', icon: Construction, path: 'cantieri', permission: 'sites.view' },
       {
         label: 'menu.reports',
         icon: ClipboardList,
