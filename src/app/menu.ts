@@ -47,7 +47,12 @@ export const menu: MenuGroup[] = [
   {
     label: 'menu.admin',
     items: [
-      { label: 'menu.deadlines', icon: CalendarClock, path: 'scadenziario', soon: true },
+      {
+        label: 'menu.deadlines',
+        icon: CalendarClock,
+        path: 'scadenziario',
+        permission: 'deadlines.view',
+      },
       { label: 'menu.costs', icon: Wallet, path: 'costi', soon: true },
     ],
   },
@@ -60,9 +65,24 @@ export const menu: MenuGroup[] = [
         path: 'anagrafiche/clienti',
         permission: 'clients.view',
       },
-      { label: 'menu.suppliers', icon: Handshake, path: 'anagrafiche/fornitori', soon: true },
-      { label: 'menu.employees', icon: Contact, path: 'anagrafiche/dipendenti', soon: true },
-      { label: 'menu.vehicles', icon: Truck, path: 'anagrafiche/mezzi', soon: true },
+      {
+        label: 'menu.suppliers',
+        icon: Handshake,
+        path: 'anagrafiche/fornitori',
+        permission: 'suppliers.view',
+      },
+      {
+        label: 'menu.employees',
+        icon: Contact,
+        path: 'anagrafiche/dipendenti',
+        permission: 'employees.view',
+      },
+      {
+        label: 'menu.vehicles',
+        icon: Truck,
+        path: 'anagrafiche/mezzi',
+        permission: 'vehicles.view',
+      },
     ],
   },
 ]

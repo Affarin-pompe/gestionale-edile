@@ -8,6 +8,10 @@ import { clientRoutes } from '@/features/clients/routes'
 import { dashboardRoutes } from '@/features/dashboard/routes'
 import { estimateRoutes } from '@/features/estimates/routes'
 import { quoteRoutes } from '@/features/quotes/routes'
+import { deadlineRoutes } from '@/features/deadlines/routes'
+import { employeeRoutes } from '@/features/employees/routes'
+import { supplierRoutes } from '@/features/suppliers/routes'
+import { vehicleRoutes } from '@/features/vehicles/routes'
 import { AuthLayout } from '@/layouts/AuthLayout'
 import { LoadingScreen } from './LoadingScreen'
 import { PageError, RouteError } from './RouteError'
@@ -46,6 +50,10 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                     ...clientRoutes(queryClient),
                     ...quoteRoutes(queryClient),
                     ...estimateRoutes(queryClient),
+                    ...deadlineRoutes(queryClient),
+                    ...supplierRoutes(queryClient),
+                    ...employeeRoutes(queryClient),
+                    ...vehicleRoutes(queryClient),
                     {
                       path: '*',
                       handle: { crumb: 'crumb.notFound' } satisfies RouteHandle,
