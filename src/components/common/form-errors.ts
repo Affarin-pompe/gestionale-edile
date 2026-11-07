@@ -21,21 +21,34 @@ export function useShowFormError<TValues extends FieldValues, TOutput>(
     }
     if (error.status !== 422) return intl.formatMessage({ id: 'form.failed' })
 
-    const errors = fieldErrors(error)
-    // The form's fields in their order on screen, so the cursor goes to the first wrong one
-    const known = Object.keys(form.getValues())
-    let focused = false
-    for (const name of known) {
-      const message = errors[name]
-      if (message === undefined) continue
-      form.setError(name as Path<TValues>, { type: 'server', message }, { shouldFocus: !focused })
-      focused = true
-    }
-    const others = Object.entries(errors)
-      .filter(([name]) => !known.includes(name))
-      .map(([, message]) => message)
+    const { focused, others } = applyFieldErrors(form, fieldErrors(error))
     // Messages for fields the form does not have still need to be seen
     if (others.length > 0) return others.join(' ')
     return focused ? undefined : intl.formatMessage({ id: 'form.invalid' })
   }
+}
+
+/**
+ * Puts the messages of a 422 under the form's fields, in their order on screen, so the cursor
+ * goes to the first wrong one. A path inside a field (labor.0.hours, for a list of rows) goes
+ * to that row's input. Returns the messages for fields the form does not have.
+ */
+export function applyFieldErrors<TValues extends FieldValues, TOutput>(
+  form: UseFormReturn<TValues, unknown, TOutput>,
+  errors: Record<string, string>,
+) {
+  const known = Object.keys(form.getValues())
+  const belongs = (path: string, name: string) => path === name || path.startsWith(`${name}.`)
+  let focused = false
+  for (const name of known) {
+    for (const [path, message] of Object.entries(errors)) {
+      if (!belongs(path, name)) continue
+      form.setError(path as Path<TValues>, { type: 'server', message }, { shouldFocus: !focused })
+      focused = true
+    }
+  }
+  const others = Object.entries(errors)
+    .filter(([path]) => !known.some((name) => belongs(path, name)))
+    .map(([, message]) => message)
+  return { focused, others }
 }

@@ -70,12 +70,13 @@ const soon = (id: MessageId) => `${T[id]}${T['menu.soon']}`
 const PLANNED_REGISTRY: string[] = []
 const menuWith = (
   registry: (string | null)[],
-  admin: string[] = [T['menu.deadlines'], soon('menu.costs')],
+  admin: string[] = [T['menu.deadlines'], T['menu.costs']],
+  work: string[] = [soon('menu.sites'), T['menu.reports']],
 ) =>
   (
     [
       [null, [DASHBOARD]],
-      [T['menu.work'], [soon('menu.sites'), soon('menu.reports')]],
+      [T['menu.work'], work],
       [T['menu.admin'], admin],
       [REGISTRY, registry],
       // A group with no item the user may see is not shown
@@ -224,15 +225,21 @@ describe('the layout inside a company', () => {
 })
 
 describe('side menu', () => {
-  it.each([TITOLARE, UFFICIO, CAPOCANTIERE])(
+  it.each([
+    [TITOLARE, [T['menu.deadlines'], T['menu.costs']]],
+    [UFFICIO, [T['menu.deadlines'], T['menu.costs']]],
+    // Without costs.view: no Costi
+    [CAPOCANTIERE, [T['menu.deadlines']]],
+  ])(
     '%s sees Dashboard, Lavori, Amministrazione, and Clienti under Anagrafiche',
-    async (email) => {
+    async (email, admin) => {
       await signIn(email)
       renderApp('/impresa-rossi')
       await waitFor(() => menuLink(DASHBOARD))
 
       expect(menuLink(CLIENTS)).toBeTruthy()
-      expect(menuGroups()).toEqual(menuWith([CLIENTS, ...PLANNED_REGISTRY]))
+      expect(menuLink(T['menu.reports'])).toBeTruthy()
+      expect(menuGroups()).toEqual(menuWith([CLIENTS, ...PLANNED_REGISTRY], admin))
     },
   )
 
@@ -243,8 +250,8 @@ describe('side menu', () => {
 
     expect(menuLink(DASHBOARD)).toBeTruthy()
     expect(queryMenuLink(CLIENTS)).toBeNull()
-    // Without companies' permissions: no Scadenziario either
-    expect(menuGroups()).toEqual(menuWith(PLANNED_REGISTRY, [soon('menu.costs')]))
+    // Without companies' permissions: no Scadenziario, Costi or Rapportini either
+    expect(menuGroups()).toEqual(menuWith(PLANNED_REGISTRY, [], [soon('menu.sites')]))
   })
 
   it.each([
@@ -256,12 +263,12 @@ describe('side menu', () => {
     await waitFor(() => menuLink(DASHBOARD))
 
     const planned = plannedItems()
-    expect(planned).toHaveLength(3)
+    expect(planned).toHaveLength(1)
     for (const item of planned) {
       expect(within(item as HTMLElement).getByText(T['menu.soon'])).toBeTruthy()
       expect(item.querySelector('a, button, [href], [tabindex]')).toBeNull()
     }
-    for (const id of ['menu.quotes', 'menu.sites', 'menu.costs'] as const) {
+    for (const id of ['menu.quotes', 'menu.sites'] as const) {
       expect(screen.queryByRole('link', { name: new RegExp(T[id]) })).toBeNull()
     }
   })

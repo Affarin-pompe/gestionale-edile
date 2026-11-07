@@ -10,6 +10,7 @@ import {
 import { FormattedMessage, useIntl } from 'react-intl'
 import { Link } from 'react-router'
 import { ApiError, fieldErrors } from '@/api/errors'
+import { applyFieldErrors } from './form-errors'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -95,19 +96,7 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
     }
     if (error.status !== 422) return intl.formatMessage({ id: 'form.failed' })
 
-    const errors = fieldErrors(error)
-    // The form's fields in their order on screen, so the cursor goes to the first wrong one
-    const known = Object.keys(form.getValues())
-    let focused = false
-    for (const name of known) {
-      const message = errors[name]
-      if (message === undefined) continue
-      form.setError(name as Path<TValues>, { type: 'server', message }, { shouldFocus: !focused })
-      focused = true
-    }
-    const others = Object.entries(errors)
-      .filter(([name]) => !known.includes(name))
-      .map(([, message]) => message)
+    const { focused, others } = applyFieldErrors(form, fieldErrors(error))
     // Messages for fields the form does not have still need to be seen
     if (others.length > 0) return others.join(' ')
     return focused ? undefined : intl.formatMessage({ id: 'form.invalid' })

@@ -41,7 +41,12 @@ export const menu: MenuGroup[] = [
       { label: 'menu.quotes', icon: FileText, path: 'preventivi', permission: 'quotes.view' },
       { label: 'menu.estimates', icon: Ruler, path: 'computi', permission: 'estimates.view' },
       { label: 'menu.sites', icon: Construction, path: 'cantieri', soon: true },
-      { label: 'menu.reports', icon: ClipboardList, path: 'rapportini', soon: true },
+      {
+        label: 'menu.reports',
+        icon: ClipboardList,
+        path: 'rapportini',
+        permission: 'reports.view',
+      },
     ],
   },
   {
@@ -53,7 +58,7 @@ export const menu: MenuGroup[] = [
         path: 'scadenziario',
         permission: 'deadlines.view',
       },
-      { label: 'menu.costs', icon: Wallet, path: 'costi', soon: true },
+      { label: 'menu.costs', icon: Wallet, path: 'costi', permission: 'costs.view' },
     ],
   },
   {

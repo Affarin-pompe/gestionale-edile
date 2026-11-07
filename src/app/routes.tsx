@@ -5,6 +5,8 @@ import { NoCompanyPage } from '@/auth/NoCompanyPage'
 import { homeLoader, loginAction, logoutAction, requireAuth, requireCompany } from '@/auth/session'
 import { AppLayout } from '@/layouts/AppLayout'
 import { clientRoutes } from '@/features/clients/routes'
+import { costRoutes } from '@/features/costs/routes'
+import { reportRoutes } from '@/features/daily-reports/routes'
 import { dashboardRoutes } from '@/features/dashboard/routes'
 import { estimateRoutes } from '@/features/estimates/routes'
 import { quoteRoutes } from '@/features/quotes/routes'
@@ -50,7 +52,9 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                     ...clientRoutes(queryClient),
                     ...quoteRoutes(queryClient),
                     ...estimateRoutes(queryClient),
+                    ...reportRoutes(queryClient),
                     ...deadlineRoutes(queryClient),
+                    ...costRoutes(queryClient),
                     ...supplierRoutes(queryClient),
                     ...employeeRoutes(queryClient),
                     ...vehicleRoutes(queryClient),
