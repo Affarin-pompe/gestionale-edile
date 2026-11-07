@@ -31,12 +31,15 @@ const anyObject = expect.any(Object) as object
 // The properties of Client in api/openapi.yaml
 const CLIENT_FIELDS = [
   ...['kind', 'name', 'vat_number', 'tax_code', 'email', 'pec', 'phone', 'sdi_code'],
-  ...['street', 'postal_code', 'city', 'province', 'notes', 'id', 'created_at', 'updated_at'],
+  ...['street', 'postal_code', 'city', 'province', 'country', 'notes'],
+  ...['id', 'archived_at', 'created_at', 'updated_at'],
 ].sort()
 
 // A fresh copy of the seed, to compare the mock's answers against
 const seed = seedClients()
-const rossiSeed = seed[ROSSI] ?? []
+// The active clients: the list shows the archived ones only with filter[archived]=true
+const rossiSeed = (seed[ROSSI] ?? []).filter((c) => c.archived_at === null)
+const rossiArchived = (seed[ROSSI] ?? []).filter((c) => c.archived_at !== null)
 const namesAsc = rossiSeed.map((c) => c.name).sort((a, b) => a.localeCompare(b, 'it'))
 const idsByCreation = [...rossiSeed]
   .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
@@ -61,6 +64,7 @@ const validClient: ClientInput = {
   postal_code: '10121',
   city: 'Torino',
   province: 'TO',
+  country: 'IT',
   notes: null,
 }
 
@@ -100,9 +104,10 @@ function createClient(api: Api, body: ClientInput, company = ROSSI) {
   return api.POST('/api/companies/{company}/clients', { params: { path: { company } }, body })
 }
 
-function updateClient(api: Api, client: string, body: ClientInput, company = ROSSI) {
+/** Seeded and new clients start at version "1". */
+function updateClient(api: Api, client: string, body: ClientInput, company = ROSSI, etag = '"1"') {
   return api.PUT('/api/companies/{company}/clients/{client}', {
-    params: { path: { company, client } },
+    params: { path: { company, client }, header: { 'If-Match': etag } },
     body,
   })
 }
@@ -595,6 +600,7 @@ describe('mock backend: create and update clients', () => {
       postal_code: ' 10121',
       city: ' Torino ',
       province: ' TO ',
+      country: ' it ',
       notes: '   ',
     })
 
@@ -603,6 +609,7 @@ describe('mock backend: create and update clients', () => {
       ...validClient,
       pec: null,
       id: anyString,
+      archived_at: null,
       created_at: anyString,
       updated_at: anyString,
     })
@@ -648,8 +655,20 @@ describe('mock backend: create and update clients', () => {
     ['an empty name', 'name', { ...validClient, name: '' }],
     ['no name at all', 'name', { ...validClient, name: undefined }],
     ['an unknown kind', 'kind', { ...validClient, kind: 'ente' }],
-    ['a company without a VAT number', 'vat_number', { ...validClient, vat_number: null }],
-    ['a person without a tax code', 'tax_code', { ...validClient, kind: 'person', tax_code: null }],
+    [
+      'an Italian company without VAT number and tax code',
+      'vat_number',
+      { ...validClient, vat_number: null },
+    ],
+    [
+      'an Italian public body without VAT number and tax code',
+      'vat_number',
+      { ...validClient, kind: 'public_body', vat_number: null },
+    ],
+    ['an Italian person without a tax code', 'tax_code', { ...validClient, kind: 'person' }],
+    ['no country', 'country', { ...validClient, country: undefined }],
+    ['a country of three letters', 'country', { ...validClient, country: 'ITA' }],
+    ['an SDI code of 5 characters', 'sdi_code', { ...validClient, sdi_code: 'AB123' }],
     ['a VAT number taken in this company', 'vat_number', { ...validClient, vat_number: takenVat }],
     ['the same, padded with spaces', 'vat_number', { ...validClient, vat_number: ` ${takenVat} ` }],
     ['an email without @', 'email', { ...validClient, email: 'ufficio.example.test' }],
@@ -759,6 +778,7 @@ describe('mock backend: create and update clients', () => {
       postal_code: '15121',
       city: 'Alessandria',
       province: 'AL',
+      country: 'IT',
       notes: 'Ora è un privato',
     }
 
@@ -768,6 +788,7 @@ describe('mock backend: create and update clients', () => {
     expect(data).toStrictEqual({
       ...replacement,
       id: ROSSI_001,
+      archived_at: null,
       created_at: before.created_at,
       updated_at: anyString,
     })
@@ -797,6 +818,166 @@ describe('mock backend: create and update clients', () => {
     expect(response.status).toBe(422)
     expect(errorFields(error)).toEqual(['vat_number'])
     expect(await getClient(api, ROSSI, ROSSI_001)).toStrictEqual(seeded(ROSSI_001))
+  })
+})
+
+function clientAction(api: Api, action: 'archive' | 'restore', client: string, etag = '"1"') {
+  const path =
+    action === 'archive'
+      ? '/api/companies/{company}/clients/{client}/archive'
+      : '/api/companies/{company}/clients/{client}/restore'
+  return api.POST(path, {
+    params: { path: { company: ROSSI, client }, header: { 'If-Match': etag } },
+  })
+}
+
+function deleteClient(api: Api, client: string, etag = '"1"') {
+  return api.DELETE('/api/companies/{company}/clients/{client}', {
+    params: { path: { company: ROSSI, client }, header: { 'If-Match': etag } },
+  })
+}
+
+/** A request without If-Match, which the types do not allow. */
+function withoutIfMatch(jar: Jar, method: string, path: string, body?: unknown) {
+  return fetch(`${BASE_URL}/api/companies/${ROSSI}/clients/${path}`, {
+    method,
+    headers: {
+      Cookie: cookieHeader(jar),
+      'X-XSRF-TOKEN': jar.get('XSRF-TOKEN') ?? '',
+      'Content-Type': 'application/json',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+}
+
+describe('mock backend: versions (ETag and If-Match)', () => {
+  it('sends the version in ETag with a client, and the next one after each change', async () => {
+    const { api } = await signedIn(TITOLARE)
+    const read = await getClientResult(api, ROSSI, ROSSI_001)
+    expect(read.response.headers.get('ETag')).toBe('"1"')
+
+    const updated = await updateClient(api, ROSSI_001, validClient)
+    expect(updated.response.headers.get('ETag')).toBe('"2"')
+    const archived = await clientAction(api, 'archive', ROSSI_001, '"2"')
+    expect(archived.response.headers.get('ETag')).toBe('"3"')
+    expect((await getClientResult(api, ROSSI, ROSSI_001)).response.headers.get('ETag')).toBe('"3"')
+
+    const created = await createClient(api, { ...validClient, vat_number: '01234567890' })
+    expect(created.response.headers.get('ETag')).toBe('"1"')
+  })
+
+  it('answers 412 with code stale_record to an older version, and changes nothing', async () => {
+    const { api } = await signedIn(TITOLARE)
+    await updateClient(api, ROSSI_001, validClient)
+
+    const results = [
+      await updateClient(api, ROSSI_001, { ...validClient, name: 'Altro nome' }),
+      await clientAction(api, 'archive', ROSSI_001),
+      await deleteClient(api, ROSSI_001),
+    ]
+
+    for (const { response, error } of results) {
+      expect(response.status).toBe(412)
+      expect(error).toStrictEqual({ message: anyString, code: 'stale_record' })
+    }
+    const client = await getClient(api, ROSSI, ROSSI_001)
+    expect(client.name).toBe(validClient.name)
+    expect(client.archived_at).toBeNull()
+  })
+
+  it.each([
+    ['PUT', ROSSI_001, validClient],
+    ['POST', `${ROSSI_001}/archive`, undefined],
+    ['POST', `${ROSSI_001}/restore`, undefined],
+    ['DELETE', ROSSI_001, undefined],
+  ])(
+    'answers 428 with code precondition_required to %s %s without If-Match',
+    async (method, path, body) => {
+      const { jar } = await signedIn(TITOLARE)
+      const response = await withoutIfMatch(jar, method, path, body)
+      expect(response.status).toBe(428)
+      expect(await response.json()).toStrictEqual({
+        message: anyString,
+        code: 'precondition_required',
+      })
+    },
+  )
+
+  it('checks the data before the version, like the backend: an invalid old update gets 422', async () => {
+    const { api } = await signedIn(TITOLARE)
+    const { response } = await updateClient(
+      api,
+      ROSSI_001,
+      { ...validClient, name: '' },
+      ROSSI,
+      '"9"',
+    )
+    expect(response.status).toBe(422)
+  })
+})
+
+describe('mock backend: archive, restore and delete', () => {
+  it('lists the archived clients only with filter[archived]=true, and the active ones otherwise', async () => {
+    const { api } = await signedIn(TITOLARE)
+    const archived = await list(api, { filter: { archived: true } })
+    // Sorted by name, as every list by default
+    expect(archived.data.map((c) => c.name)).toEqual(
+      rossiArchived.map((c) => c.name).sort((a, b) => a.localeCompare(b, 'it')),
+    )
+    expect(archived.data.every((c) => c.archived_at !== null)).toBe(true)
+    expect((await list(api, { filter: { archived: false } })).meta.total).toBe(60)
+    const publicBodies = await list(api, { filter: { kind: 'public_body', archived: true } })
+    expect(publicBodies.data.map((c) => c.kind)).toEqual(['public_body'])
+  })
+
+  it('archives a client: out of the default list, still readable; archiving again keeps the date', async () => {
+    const { api } = await signedIn(TITOLARE)
+    const first = await clientAction(api, 'archive', ROSSI_001)
+    expect(first.response.status).toBe(200)
+    const date = first.data?.archived_at
+    expect(date).toBeTruthy()
+
+    expect((await list(api)).meta.total).toBe(59)
+    expect((await getClient(api, ROSSI, ROSSI_001)).archived_at).toBe(date)
+    const again = await clientAction(api, 'archive', ROSSI_001, '"2"')
+    expect(again.data?.archived_at).toBe(date)
+  })
+
+  it('restores an archived client among the active ones', async () => {
+    const { api } = await signedIn(TITOLARE)
+    const [archived] = rossiArchived
+    if (!archived) throw new Error('No archived client in the seed')
+
+    const { response, data } = await clientAction(api, 'restore', archived.id)
+
+    expect(response.status).toBe(200)
+    expect(data?.archived_at).toBeNull()
+    expect((await list(api)).meta.total).toBe(61)
+  })
+
+  it('deletes a client without documents with 204; then it is not found', async () => {
+    const { api } = await signedIn(TITOLARE)
+    const { response } = await deleteClient(api, 'impresa-rossi-002')
+    expect(response.status).toBe(204)
+    expect((await getClientResult(api, ROSSI, 'impresa-rossi-002')).response.status).toBe(404)
+    expect((await list(api)).meta.total).toBe(59)
+  })
+
+  it('answers 409 with code has_documents to deleting a client with documents, and keeps it', async () => {
+    const { api } = await signedIn(TITOLARE)
+    const { response, error } = await deleteClient(api, ROSSI_001)
+    expect(response.status).toBe(409)
+    expect(error).toStrictEqual({ message: anyString, code: 'has_documents' })
+    expect(await getClient(api, ROSSI, ROSSI_001)).toStrictEqual(seeded(ROSSI_001))
+  })
+
+  it('answers 403 to ufficio, without clients.delete, and to capocantiere for archiving', async () => {
+    const office = await signedIn(UFFICIO)
+    expect((await deleteClient(office.api, 'impresa-rossi-002')).response.status).toBe(403)
+    const site = await signedIn(CAPOCANTIERE)
+    expect((await clientAction(site.api, 'archive', ROSSI_001)).response.status).toBe(403)
+    expect((await clientAction(site.api, 'restore', ROSSI_001)).response.status).toBe(403)
+    expect((await list(site.api)).meta.total).toBe(60)
   })
 })
 

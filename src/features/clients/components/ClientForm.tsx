@@ -9,6 +9,7 @@ const Select = SelectField<ClientFormValues>
 
 const KIND_OPTIONS = [
   { value: 'company', label: 'clients.kind.company' },
+  { value: 'public_body', label: 'clients.kind.public_body' },
   { value: 'person', label: 'clients.kind.person' },
 ] as const
 
@@ -16,27 +17,33 @@ const KIND_OPTIONS = [
 export function ClientForm({
   client,
   onSubmit,
+  onReload,
   cancelTo,
 }: {
   client?: Client
   onSubmit: (input: ClientInput) => Promise<void>
+  /** Loads the client again after someone else changed it (see EntityForm). */
+  onReload?: () => Promise<void>
   cancelTo: string
 }) {
   const form = useForm<ClientFormValues, unknown, ClientInput>({
     resolver: zodResolver(clientSchema),
     defaultValues: clientFormValues(client),
   })
-  // A company needs the VAT number, a private person the tax code
-  const kind = useWatch({ control: form.control, name: 'kind' })
+  // For Italian clients: a private person needs the tax code; a company or a public body
+  // the VAT number or the tax code. Abroad neither is required.
+  const [kind, country] = useWatch({ control: form.control, name: ['kind', 'country'] })
+  const italian = country.trim().toUpperCase() === 'IT'
+  const taxIds = ['vat_number', 'tax_code'] as const
 
   return (
-    <EntityForm form={form} onSubmit={onSubmit} cancelTo={cancelTo}>
+    <EntityForm form={form} onSubmit={onSubmit} onReload={onReload} cancelTo={cancelTo}>
       <FormSection legend="clients.section.main">
         <Select
           name="kind"
           label="clients.kind"
           options={KIND_OPTIONS}
-          deps={['vat_number', 'tax_code']}
+          deps={[...taxIds]}
           required
         />
         <Text name="name" label="clients.name" hint="clients.name.hint" maxLength={200} required />
@@ -45,11 +52,18 @@ export function ClientForm({
         <Text
           name="vat_number"
           label="clients.vatNumber"
+          hint={italian && kind !== 'person' ? 'clients.vatNumber.hint' : undefined}
           maxLength={20}
-          required={kind === 'company'}
+          deps={['tax_code']}
         />
-        <Text name="tax_code" label="clients.taxCode" maxLength={16} required={kind === 'person'} />
-        <Text name="sdi_code" label="clients.sdiCode" maxLength={7} />
+        <Text
+          name="tax_code"
+          label="clients.taxCode"
+          maxLength={16}
+          required={italian && kind === 'person'}
+          deps={['vat_number']}
+        />
+        <Text name="sdi_code" label="clients.sdiCode" hint="clients.sdiCode.hint" maxLength={7} />
       </FormSection>
       <FormSection legend="clients.section.contacts">
         <Text name="email" label="clients.email" type="email" autoComplete="off" />
@@ -61,6 +75,14 @@ export function ClientForm({
         <Text name="postal_code" label="clients.postalCode" maxLength={10} />
         <Text name="city" label="clients.city" maxLength={100} />
         <Text name="province" label="clients.province" hint="clients.province.hint" maxLength={2} />
+        <Text
+          name="country"
+          label="clients.country"
+          hint="clients.country.hint"
+          maxLength={2}
+          deps={[...taxIds]}
+          required
+        />
       </FormSection>
       <Text name="notes" label="clients.notes" multiline maxLength={2000} />
     </EntityForm>

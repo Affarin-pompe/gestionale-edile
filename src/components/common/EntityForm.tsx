@@ -35,21 +35,30 @@ import { isMessageId, type MessageId } from '@/i18n/it'
 export function EntityForm<TValues extends FieldValues, TOutput>({
   form,
   onSubmit,
+  onReload,
   cancelTo,
   children,
 }: {
   form: UseFormReturn<TValues, unknown, TOutput>
   /** Saves; a thrown ApiError is shown on the form. */
   onSubmit: (values: TOutput) => Promise<void>
+  /**
+   * Loads the record again, after a 412 (someone else changed it in the meantime). Without it
+   * the message only asks to reload the page.
+   */
+  onReload?: () => Promise<void>
   /** Where Cancel goes; a list reopens as the user left it. */
   cancelTo: string
   children: ReactNode
 }) {
   const intl = useIntl()
   const [problem, setProblem] = useState<string>()
+  const [stale, setStale] = useState(false)
+  const [reloading, setReloading] = useState(false)
 
   const submit = form.handleSubmit(async (values) => {
     setProblem(undefined)
+    setStale(false)
     try {
       await onSubmit(values)
     } catch (error) {
@@ -57,10 +66,29 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
     }
   })
 
+  async function reload() {
+    if (!onReload) return
+    setReloading(true)
+    try {
+      await onReload()
+      setProblem(undefined)
+      setStale(false)
+    } catch {
+      setProblem(intl.formatMessage({ id: 'form.reloadFailed' }))
+    } finally {
+      setReloading(false)
+    }
+  }
+
   /** Puts the error on the fields it names; returns what to show above the buttons. */
   function showError(error: unknown) {
     if (!(error instanceof ApiError)) return intl.formatMessage({ id: 'form.failed' })
     if (error.status === 403) return intl.formatMessage({ id: 'form.forbidden' })
+    // 412: someone else saved first. 428: the version was missing. Reloading fixes both.
+    if (error.status === 412 || error.status === 428) {
+      setStale(true)
+      return intl.formatMessage({ id: onReload ? 'form.stale' : 'form.staleReloadPage' })
+    }
     if (error.status !== 422) return intl.formatMessage({ id: 'form.failed' })
 
     const errors = fieldErrors(error)
@@ -89,9 +117,21 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
         </p>
         {children}
         {problem && (
-          <p role="alert" className="text-sm text-destructive">
-            {problem}
-          </p>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <p role="alert" className="text-sm text-destructive">
+              {problem}
+            </p>
+            {stale && onReload && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={reloading}
+                onClick={() => void reload()}
+              >
+                <FormattedMessage id="form.reload" />
+              </Button>
+            )}
+          </div>
         )}
         <div className="flex flex-wrap justify-end gap-2.5">
           <Button asChild variant="outline">
@@ -184,15 +224,18 @@ export function TextField<TValues extends FieldValues>({
   multiline = false,
   maxLength,
   autoComplete,
+  deps,
   ...props
 }: FieldProps<TValues> & {
   type?: 'text' | 'email' | 'tel'
   multiline?: boolean
   maxLength?: number
   autoComplete?: string
+  /** Fields whose checks depend on this one, checked again when it changes. */
+  deps?: Path<TValues>[]
 }) {
   const parts = useFieldParts(props)
-  const field = parts.register(props.name)
+  const field = parts.register(props.name, { deps })
   return (
     <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
       {parts.label}

@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { Pencil } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { FormattedMessage } from 'react-intl'
+import { FormattedDate, FormattedMessage, useIntl } from 'react-intl'
 import { Link } from 'react-router'
 import { useCompany } from '@/auth/me'
 import { PageHeader } from '@/components/common/PageHeader'
@@ -10,38 +10,64 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import type { MessageId } from '@/i18n/it'
 import { clientQuery } from '../api'
+import { ClientActions } from '../components/ClientActions'
 import { ClientKindBadge } from '../components/ClientKindBadge'
 import { clientPaths, useClientId } from '../paths'
 
 export function ClientDetailPage() {
+  const intl = useIntl()
   const company = useCompany()
   const id = useClientId()
   const paths = clientPaths(company.slug)
   // Already loaded by the route's loader
-  const { data: client } = useSuspenseQuery(clientQuery(company.slug, id))
+  const { data } = useSuspenseQuery(clientQuery(company.slug, id))
+  const { client } = data
   const place = [client.postal_code, client.city, client.province && `(${client.province})`]
     .filter(Boolean)
     .join(' ')
 
+  // The country's name in Italian (Germania), or its code if the browser does not know it
+  const country =
+    intl.formatDisplayName(client.country, { type: 'region', fallback: 'code' }) ?? client.country
   return (
     <div className="flex max-w-4xl flex-col gap-5">
       <PageHeader
         back={{ to: paths.list, label: <FormattedMessage id="clients.title" /> }}
         title={client.name}
         actions={
-          <PermissionGate permission="clients.update">
-            <Button asChild>
-              <Link to={paths.edit(id)}>
-                <Pencil aria-hidden="true" />
-                <FormattedMessage id="clients.edit" />
-              </Link>
-            </Button>
-          </PermissionGate>
+          <>
+            <PermissionGate permission="clients.update">
+              <Button asChild>
+                <Link to={paths.edit(id)}>
+                  <Pencil aria-hidden="true" />
+                  <FormattedMessage id="clients.edit" />
+                </Link>
+              </Button>
+            </PermissionGate>
+            <ClientActions data={data} />
+          </>
         }
       />
-      <p>
+      <div className="flex flex-wrap items-center gap-2.5">
         <ClientKindBadge kind={client.kind} />
-      </p>
+        {client.archived_at !== null && (
+          <p className="text-muted-foreground">
+            <FormattedMessage
+              id="clients.archivedOn"
+              values={{
+                date: (
+                  <FormattedDate
+                    value={client.archived_at}
+                    day="2-digit"
+                    month="2-digit"
+                    year="numeric"
+                  />
+                ),
+              }}
+            />
+          </p>
+        )}
+      </div>
       <div className="grid gap-5 lg:grid-cols-2">
         <DetailSection title="clients.section.tax">
           <Detail label="clients.vatNumber">{client.vat_number}</Detail>
@@ -60,6 +86,7 @@ export function ClientDetailPage() {
         <DetailSection title="clients.section.address">
           <Detail label="clients.street">{client.street}</Detail>
           <Detail label="clients.city">{place}</Detail>
+          <Detail label="clients.country">{country}</Detail>
         </DetailSection>
         <Section title="clients.notes">
           <p className="break-words whitespace-pre-line">{client.notes ?? <Missing />}</p>

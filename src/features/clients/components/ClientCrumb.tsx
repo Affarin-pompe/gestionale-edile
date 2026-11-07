@@ -11,7 +11,7 @@ export function ClientCrumb() {
   const id = useClientId()
   // Only what the route's loader put in the cache: no second request for a client that failed
   const { data, error } = useQuery({ ...clientQuery(company.slug, id), enabled: false })
-  if (data) return data.name
+  if (data) return data.client.name
   // Only a 404 says the client is not there; after other errors nothing is known about it
   const notFound = error instanceof ApiError && error.status === 404
   return <FormattedMessage id={notFound ? 'crumb.notFound' : 'clients.one'} />

@@ -18,6 +18,9 @@ import { ClientLink } from '../components/ClientLink'
 import { clientPaths } from '../paths'
 
 const KIND = 'tipo'
+// Without it the list shows the active clients
+const STATUS = 'stato'
+const ARCHIVED = 'archiviati'
 const column = listColumnHelper<Client>()
 // Sortable columns have the id of a sort value of the API
 const columns = column.columns([
@@ -52,8 +55,12 @@ const columns = column.columns([
 export function ClientListPage() {
   const intl = useIntl()
   const company = useCompany()
-  const list = useListParams({ sorts: CLIENT_SORTS, filters: { [KIND]: CLIENT_KINDS } })
+  const list = useListParams({
+    sorts: CLIENT_SORTS,
+    filters: { [KIND]: CLIENT_KINDS, [STATUS]: [ARCHIVED] },
+  })
   const kind = list.filters[KIND] as ClientKind | undefined
+  const archived = list.filters[STATUS] === ARCHIVED
   const query = useQuery(
     clientListQuery(company.slug, {
       page: list.page,
@@ -61,9 +68,10 @@ export function ClientListPage() {
       sort: list.sort,
       search: list.search,
       kind,
+      archived,
     }),
   )
-  const filtered = list.search.trim() !== '' || kind !== undefined || list.page > 1
+  const filtered = list.search.trim() !== '' || kind !== undefined || archived || list.page > 1
 
   return (
     <div className="flex flex-col gap-5">
@@ -99,6 +107,18 @@ export function ClientListPage() {
                   {intl.formatMessage({ id: `clients.kind.${value}` })}
                 </NativeSelectOption>
               ))}
+            </NativeSelect>
+            <NativeSelect
+              aria-label={intl.formatMessage({ id: 'clients.status' })}
+              value={archived ? ARCHIVED : ''}
+              onChange={(event) => list.setFilter(STATUS, event.target.value || undefined)}
+            >
+              <NativeSelectOption value="">
+                {intl.formatMessage({ id: 'clients.status.active' })}
+              </NativeSelectOption>
+              <NativeSelectOption value={ARCHIVED}>
+                {intl.formatMessage({ id: 'clients.status.archived' })}
+              </NativeSelectOption>
             </NativeSelect>
           </FilterBar>
         }
