@@ -30,6 +30,8 @@ Gli stessi controlli girano su GitHub a ogni pull request. Il titolo della PR de
 
 In sviluppo le API sono simulate con MSW (`src/mocks/`), quindi il backend non serve. Per entrare si usa uno degli utenti di prova: email e password sono in `src/mocks/data.ts`. A ogni ricaricamento della pagina i dati tornano quelli iniziali; la sessione invece resta.
 
+Per provare l'app contro il backend vero (repository `gestionale-edile-backend`, avviato su `http://127.0.0.1:3100` con i dati di sviluppo), senza mock: `npm run preview:backend`, poi http://localhost:5190. Si entra con gli utenti dei dati di sviluppo del backend. Se il browser ha ancora il cookie `session` dei mock, va cancellato: i cookie di `localhost` valgono per tutte le porte.
+
 ## Variabili d'ambiente
 Per ora nessuna. L'elenco è in `.env.example`.
 
