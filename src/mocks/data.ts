@@ -2,6 +2,7 @@ import type { components } from '@/api/schema'
 
 type Client = components['schemas']['Client']
 type Permission = components['schemas']['Permission']
+type Dashboard = components['schemas']['Dashboard']
 
 // Made-up data for development and tests. Never put real people or companies here.
 
@@ -182,4 +183,82 @@ export function seedClients(): Record<string, Client[]> {
 /** Clients with quotes, estimates or deadlines: they can be archived, not deleted (409). */
 export function seedClientsWithDocuments() {
   return new Set(['impresa-rossi-001'])
+}
+
+/** A day counted from `today` (YYYY-MM-DD), in the same format. */
+function addDays(today: string, days: number) {
+  const date = new Date(`${today}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+/**
+ * The full dashboard of a company on a given day; the handler blanks the sections the user
+ * may not see. Deadlines are around that day, so some are always overdue.
+ */
+export function dashboardFor(company: string, today: string): Dashboard {
+  if (company !== 'impresa-rossi') {
+    return {
+      today,
+      sites: { planned: 0, active: 0, suspended: 0, completed: 0 },
+      over_budget: [],
+      costs_this_month: { month: today.slice(0, 7), total: '0.00' },
+      reports: { to_approve: 0, drafts: 0 },
+      deadlines: [],
+    }
+  }
+  return {
+    today,
+    sites: { planned: 2, active: 5, suspended: 1, completed: 12 },
+    over_budget: [
+      {
+        site: { id: 'cantiere-002', name: 'Ristrutturazione bagno Via Po', code: 'C-2026-002' },
+        budget: '18000.00',
+        total: '21450.30',
+        overrun: '3450.30',
+      },
+      {
+        site: { id: 'cantiere-005', name: 'Cappotto termico facciata nord', code: null },
+        budget: '64000.00',
+        total: '64120.00',
+        overrun: '120.00',
+      },
+    ],
+    costs_this_month: { month: today.slice(0, 7), total: '48210.75' },
+    reports: { to_approve: 3, drafts: 2 },
+    deadlines: [
+      {
+        id: 'scadenza-001',
+        title: 'DURC – Idraulica Prova S.n.c.',
+        due_on: addDays(today, -6),
+        kind: 'durc',
+        amount: null,
+        overdue: true,
+      },
+      {
+        id: 'scadenza-002',
+        title: 'F24 ritenute e contributi',
+        due_on: addDays(today, -2),
+        kind: 'tax',
+        amount: '4123.00',
+        overdue: true,
+      },
+      {
+        id: 'scadenza-003',
+        title: 'Revisione autocarro',
+        due_on: addDays(today, 4),
+        kind: 'vehicle',
+        amount: '89.00',
+        overdue: false,
+      },
+      {
+        id: 'scadenza-004',
+        title: 'Pagamento fattura Laterizi Prova S.r.l.',
+        due_on: addDays(today, 7),
+        kind: 'invoice_in',
+        amount: '7350.00',
+        overdue: false,
+      },
+    ],
+  }
 }

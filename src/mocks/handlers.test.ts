@@ -981,6 +981,37 @@ describe('mock backend: archive, restore and delete', () => {
   })
 })
 
+describe('mock backend: dashboard', () => {
+  async function dashboard(email: string, company = ROSSI) {
+    const { api } = await signedIn(email)
+    return api.GET('/api/companies/{company}/dashboard', { params: { path: { company } } })
+  }
+
+  it('gives the titolare every section', async () => {
+    const { response, data } = await dashboard(TITOLARE)
+    expect(response.status).toBe(200)
+    expect(data?.today).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(data?.sites).not.toBeNull()
+    expect(data?.over_budget?.length).toBeGreaterThan(0)
+    expect(data?.costs_this_month?.month).toBe(data?.today.slice(0, 7))
+    expect(data?.reports).not.toBeNull()
+    expect(data?.deadlines?.some((d) => d.overdue)).toBe(true)
+  })
+
+  it('leaves out, as null, what the role may not see: capocantiere has no costs', async () => {
+    const { data } = await dashboard(CAPOCANTIERE)
+    expect(data?.costs_this_month).toBeNull()
+    expect(data?.over_budget).toBeNull()
+    expect(data?.sites).not.toBeNull()
+    expect(data?.deadlines).not.toBeNull()
+  })
+
+  it('answers 404 to a company the user is not in', async () => {
+    const { response } = await dashboard(UFFICIO, VERDI)
+    expect(response.status).toBe(404)
+  })
+})
+
 describe('mock backend: state between tests', () => {
   let createdId: string | undefined
 

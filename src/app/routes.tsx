@@ -5,8 +5,8 @@ import { NoCompanyPage } from '@/auth/NoCompanyPage'
 import { homeLoader, loginAction, logoutAction, requireAuth, requireCompany } from '@/auth/session'
 import { AppLayout } from '@/layouts/AppLayout'
 import { clientRoutes } from '@/features/clients/routes'
+import { dashboardRoutes } from '@/features/dashboard/routes'
 import { AuthLayout } from '@/layouts/AuthLayout'
-import { HomePage } from './HomePage'
 import { LoadingScreen } from './LoadingScreen'
 import { PageError, RouteError } from './RouteError'
 import type { RouteHandle } from './route-handle'
@@ -40,7 +40,7 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                   // Errors of a page show inside the layout
                   ErrorBoundary: PageError,
                   children: [
-                    { index: true, Component: HomePage },
+                    ...dashboardRoutes(),
                     ...clientRoutes(queryClient),
                     {
                       path: '*',

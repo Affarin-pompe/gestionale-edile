@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw/http'
 import type { components } from '@/api/schema'
-import { companies, MOCK_PASSWORD, users } from './data'
+import { companies, dashboardFor, MOCK_PASSWORD, users } from './data'
 import { db } from './db'
 
 type Schemas = components['schemas']
@@ -182,6 +182,11 @@ function parseClient(
     if (value && value.length > max) errors[key] ??= [`Al massimo ${max} caratteri.`]
   }
   return Object.keys(errors).length > 0 ? { errors } : { input }
+}
+
+/** Today's date in Italy, as the backend counts it (YYYY-MM-DD). */
+function todayInItaly() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date())
 }
 
 /**
@@ -401,4 +406,21 @@ export const handlers = [
       },
     ),
   ),
+
+  // Any member may ask; each section is null without its permission
+  http.get(path('/companies/:company/dashboard'), ({ request, cookies, params }) => {
+    const company = String(params.company)
+    const permissions = guard(request, cookies, company, false)
+    if (permissions instanceof Response) return permissions
+    const can = (permission: Schemas['Permission']) => permissions.includes(permission)
+    const full = dashboardFor(company, todayInItaly())
+    return HttpResponse.json({
+      today: full.today,
+      sites: can('sites.view') ? full.sites : null,
+      over_budget: can('sites.view') && can('costs.view') ? full.over_budget : null,
+      costs_this_month: can('costs.view') ? full.costs_this_month : null,
+      reports: can('reports.view') ? full.reports : null,
+      deadlines: can('deadlines.view') ? full.deadlines : null,
+    } satisfies Schemas['Dashboard'])
+  }),
 ]
