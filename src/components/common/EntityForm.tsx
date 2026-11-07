@@ -9,7 +9,6 @@ import {
 } from 'react-hook-form'
 import { FormattedMessage, useIntl } from 'react-intl'
 import { Link } from 'react-router'
-import { ApiError, fieldErrors } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -27,6 +26,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import { listHref } from '@/hooks/use-list-params'
 import { isMessageId, type MessageId } from '@/i18n/it'
+import { useShowFormError } from './form-errors'
 
 /**
  * A form that saves an entity. A 422 puts the backend's messages under their fields;
@@ -45,8 +45,8 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
   cancelTo: string
   children: ReactNode
 }) {
-  const intl = useIntl()
   const [problem, setProblem] = useState<string>()
+  const showError = useShowFormError(form)
 
   const submit = form.handleSubmit(async (values) => {
     setProblem(undefined)
@@ -56,30 +56,6 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
       setProblem(showError(error))
     }
   })
-
-  /** Puts the error on the fields it names; returns what to show above the buttons. */
-  function showError(error: unknown) {
-    if (!(error instanceof ApiError)) return intl.formatMessage({ id: 'form.failed' })
-    if (error.status === 403) return intl.formatMessage({ id: 'form.forbidden' })
-    if (error.status !== 422) return intl.formatMessage({ id: 'form.failed' })
-
-    const errors = fieldErrors(error)
-    // The form's fields in their order on screen, so the cursor goes to the first wrong one
-    const known = Object.keys(form.getValues())
-    let focused = false
-    for (const name of known) {
-      const message = errors[name]
-      if (message === undefined) continue
-      form.setError(name as Path<TValues>, { type: 'server', message }, { shouldFocus: !focused })
-      focused = true
-    }
-    const others = Object.entries(errors)
-      .filter(([name]) => !known.includes(name))
-      .map(([, message]) => message)
-    // Messages for fields the form does not have still need to be seen
-    if (others.length > 0) return others.join(' ')
-    return focused ? undefined : intl.formatMessage({ id: 'form.invalid' })
-  }
 
   return (
     <FormProvider {...form}>
@@ -184,12 +160,15 @@ export function TextField<TValues extends FieldValues>({
   multiline = false,
   maxLength,
   autoComplete,
+  inputMode,
   ...props
 }: FieldProps<TValues> & {
   type?: 'text' | 'email' | 'tel'
   multiline?: boolean
   maxLength?: number
   autoComplete?: string
+  /** The phone's keyboard, e.g. 'decimal' for amounts and quantities. */
+  inputMode?: 'decimal' | 'numeric'
 }) {
   const parts = useFieldParts(props)
   const field = parts.register(props.name)
@@ -206,6 +185,7 @@ export function TextField<TValues extends FieldValues>({
             type={type}
             maxLength={maxLength}
             autoComplete={autoComplete}
+            inputMode={inputMode}
           />
         )}
         {parts.after}
@@ -237,6 +217,38 @@ export function SelectField<TValues extends FieldValues>({
           {options.map((option) => (
             <NativeSelectOption key={option.value} value={option.value}>
               {intl.formatMessage({ id: option.label })}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        {parts.after}
+      </FieldContent>
+    </Field>
+  )
+}
+
+/** A choice among records or values whose names are data, not texts of src/i18n. */
+export function ChoiceField<TValues extends FieldValues>({
+  options,
+  empty,
+  ...props
+}: FieldProps<TValues> & {
+  options: readonly { value: string; text: string }[]
+  /** The first option, for "none"; without it a value must be chosen. */
+  empty?: MessageId
+}) {
+  const intl = useIntl()
+  const parts = useFieldParts(props)
+  return (
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
+      {parts.label}
+      <FieldContent className="min-w-0 gap-1.5">
+        <NativeSelect className="w-full" {...parts.control} {...parts.register(props.name)}>
+          {empty && (
+            <NativeSelectOption value="">{intl.formatMessage({ id: empty })}</NativeSelectOption>
+          )}
+          {options.map((option) => (
+            <NativeSelectOption key={option.value} value={option.value}>
+              {option.text}
             </NativeSelectOption>
           ))}
         </NativeSelect>
