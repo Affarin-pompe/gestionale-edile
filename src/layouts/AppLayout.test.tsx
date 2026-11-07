@@ -71,7 +71,8 @@ const menuWith = (registry: (string | null)[]) => [
   [null, [DASHBOARD]],
   [
     T['menu.work'],
-    [soon('menu.quotes'), soon('menu.estimates'), soon('menu.sites'), soon('menu.reports')],
+    // Quotes and estimates are built: hidden to the test users, who lack their permissions
+    [soon('menu.sites'), soon('menu.reports')],
   ],
   [T['menu.admin'], [soon('menu.deadlines'), soon('menu.costs')]],
   [REGISTRY, registry],
@@ -250,7 +251,7 @@ describe('side menu', () => {
     await waitFor(() => menuLink(DASHBOARD))
 
     const planned = plannedItems()
-    expect(planned).toHaveLength(9)
+    expect(planned).toHaveLength(7)
     for (const item of planned) {
       expect(within(item as HTMLElement).getByText(T['menu.soon'])).toBeTruthy()
       expect(item.querySelector('a, button, [href], [tabindex]')).toBeNull()

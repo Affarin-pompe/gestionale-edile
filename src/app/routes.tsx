@@ -5,6 +5,8 @@ import { NoCompanyPage } from '@/auth/NoCompanyPage'
 import { homeLoader, loginAction, logoutAction, requireAuth, requireCompany } from '@/auth/session'
 import { AppLayout } from '@/layouts/AppLayout'
 import { clientRoutes } from '@/features/clients/routes'
+import { estimateRoutes } from '@/features/estimates/routes'
+import { quoteRoutes } from '@/features/quotes/routes'
 import { AuthLayout } from '@/layouts/AuthLayout'
 import { HomePage } from './HomePage'
 import { LoadingScreen } from './LoadingScreen'
@@ -42,6 +44,8 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                   children: [
                     { index: true, Component: HomePage },
                     ...clientRoutes(queryClient),
+                    ...quoteRoutes(queryClient),
+                    ...estimateRoutes(queryClient),
                     {
                       path: '*',
                       handle: { crumb: 'crumb.notFound' } satisfies RouteHandle,

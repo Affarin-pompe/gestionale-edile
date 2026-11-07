@@ -38,8 +38,8 @@ export const menu: MenuGroup[] = [
   {
     label: 'menu.work',
     items: [
-      { label: 'menu.quotes', icon: FileText, path: 'preventivi', soon: true },
-      { label: 'menu.estimates', icon: Ruler, path: 'computi', soon: true },
+      { label: 'menu.quotes', icon: FileText, path: 'preventivi', permission: 'quotes.view' },
+      { label: 'menu.estimates', icon: Ruler, path: 'computi', permission: 'estimates.view' },
       { label: 'menu.sites', icon: Construction, path: 'cantieri', soon: true },
       { label: 'menu.reports', icon: ClipboardList, path: 'rapportini', soon: true },
     ],
