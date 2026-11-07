@@ -15,7 +15,7 @@ export function ClientNewPage() {
   const create = useCreateClient(company.slug)
 
   async function save(input: ClientInput) {
-    const client = await create.mutateAsync(input)
+    const { client } = await create.mutateAsync(input)
     toast.success(intl.formatMessage({ id: 'clients.created' }))
     await navigate(paths.detail(client.id))
   }

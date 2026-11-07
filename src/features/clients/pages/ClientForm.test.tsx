@@ -111,7 +111,7 @@ describe('new client, checks before saving', () => {
     await user.click(saveButton())
 
     await waitFor(() => expect(errorIn(textbox(T['clients.name']))).toBe(T['validation.required']))
-    expect(errorIn(textbox(T['clients.vatNumber']))).toBe(T['clients.vatRequired'])
+    expect(errorIn(textbox(T['clients.vatNumber']))).toBe(T['clients.vatOrTaxCodeRequired'])
     expect(invalidFields()).toEqual([T['clients.name'], T['clients.vatNumber']])
     expect(countRequests('POST', ROSSI_CLIENTS_PATH)).toBe(0)
   })
@@ -160,13 +160,15 @@ describe('new client, checks before saving', () => {
     expect(invalidFields()).toEqual([T['clients.name'], T['clients.taxCode']])
   })
 
-  it('marks as required the VAT number of a company and the tax code of a person', async () => {
+  it('marks as required the tax code of an Italian person, and neither tax id of a company', async () => {
     const { user } = await openNewForm()
     const required = (name: string) => textbox(name).getAttribute('aria-required')
 
     expect(kindSelect().value).toBe('company')
-    expect(required(T['clients.vatNumber'])).toBe('true')
+    // A company needs one of the two, so neither is required on its own
+    expect(required(T['clients.vatNumber'])).toBeNull()
     expect(required(T['clients.taxCode'])).toBeNull()
+    expect(required(T['clients.country'])).toBe('true')
 
     await user.selectOptions(kindSelect(), T['clients.kind.person'])
 
@@ -175,10 +177,63 @@ describe('new client, checks before saving', () => {
     expect(required(T['clients.name'])).toBe('true')
     expect(kindSelect().getAttribute('aria-required')).toBe('true')
 
-    await user.selectOptions(kindSelect(), T['clients.kind.company'])
+    // Abroad the Italian tax code is not required
+    await user.clear(textbox(T['clients.country']))
+    await user.type(textbox(T['clients.country']), 'DE')
 
-    await waitFor(() => expect(required(T['clients.vatNumber'])).toBe('true'))
-    expect(required(T['clients.taxCode'])).toBeNull()
+    await waitFor(() => expect(required(T['clients.taxCode'])).toBeNull())
+  })
+
+  it('a company with the tax code only, and no VAT number, can be saved', async () => {
+    const bodies = recordSavedBodies()
+    const { user } = await openNewForm()
+    await user.type(textbox(T['clients.name']), 'Associazione Prova')
+    await user.type(textbox(T['clients.taxCode']), '90012345678')
+
+    await user.click(saveButton())
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ kind: 'company', vat_number: null, tax_code: '90012345678' })
+  })
+
+  it('a public body needs the VAT number or the tax code, like a company', async () => {
+    const { user } = await openNewForm()
+    await user.selectOptions(kindSelect(), T['clients.kind.public_body'])
+    await user.type(textbox(T['clients.name']), 'Comune di Prova')
+
+    await user.click(saveButton())
+
+    await waitFor(() =>
+      expect(errorIn(textbox(T['clients.vatNumber']))).toBe(T['clients.vatOrTaxCodeRequired']),
+    )
+    expect(countRequests('POST', ROSSI_CLIENTS_PATH)).toBe(0)
+  })
+
+  it('a foreign client is saved without Italian tax ids, with the country in upper case', async () => {
+    const bodies = recordSavedBodies()
+    const { user } = await openNewForm()
+    await user.type(textbox(T['clients.name']), 'Bau Prova GmbH')
+    await user.clear(textbox(T['clients.country']))
+    await user.type(textbox(T['clients.country']), 'de')
+
+    await user.click(saveButton())
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ vat_number: null, tax_code: null, country: 'DE' })
+  })
+
+  it('a country that is not a two-letter code is refused before saving', async () => {
+    const { user } = await openNewForm()
+    await user.type(textbox(T['clients.name']), 'Bau Prova GmbH')
+    await user.clear(textbox(T['clients.country']))
+    await user.type(textbox(T['clients.country']), 'D1')
+
+    await user.click(saveButton())
+
+    await waitFor(() =>
+      expect(errorIn(textbox(T['clients.country']))).toBe(T['clients.countryInvalid']),
+    )
+    expect(countRequests('POST', ROSSI_CLIENTS_PATH)).toBe(0)
   })
 })
 
@@ -454,6 +509,7 @@ describe('new client, saving', () => {
       postal_code: null,
       city: 'Torino',
       province: null,
+      country: 'IT',
       notes: null,
     })
   })
@@ -530,6 +586,7 @@ describe('editing a client', () => {
         'clients.postalCode',
         'clients.city',
         'clients.province',
+        'clients.country',
         'clients.notes',
       ].map((id) => [id, textbox(T[id as keyof typeof T]).value]),
     )
@@ -545,6 +602,7 @@ describe('editing a client', () => {
       'clients.postalCode': '10121',
       'clients.city': 'Torino',
       'clients.province': 'TO',
+      'clients.country': 'IT',
       'clients.notes': '',
     })
   })
@@ -573,6 +631,7 @@ describe('editing a client', () => {
       postal_code: '10121',
       city: 'Torino',
       province: 'TO',
+      country: 'IT',
       notes: 'Cliente dal 2020.',
     })
     expect(countRequests('PUT', FERRI_API_PATH)).toBe(1)
@@ -627,6 +686,58 @@ describe('editing a client', () => {
     expect(within(row).getByText('Asti')).toBeTruthy()
     expect(screen.queryByRole('row', { name: /^Edil Ferri S\.r\.l\./ })).toBeNull()
     expect(router.state.location.pathname).toBe(LIST_URL)
+  })
+})
+
+describe('editing a client changed by someone else in the meantime', () => {
+  it('sends the version read with the client in If-Match', async () => {
+    const versions: (string | null)[] = []
+    server.use(
+      http.put(CLIENT_API, ({ request }) => {
+        versions.push(request.headers.get('If-Match'))
+      }),
+    )
+    const { router, user } = await openEditForm()
+
+    await user.click(saveButton())
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(FERRI_URL))
+    expect(versions).toEqual(['"1"'])
+  })
+
+  it('a 412 says that someone else changed it, keeps what was typed and saves nothing', async () => {
+    const { router, user } = await openEditForm()
+    // Someone else saves first: the version in the mock backend moves on
+    db.clientVersions.set(FERRI_ID, 2)
+    await user.clear(textbox(T['clients.city']))
+    await user.type(textbox(T['clients.city']), 'Asti')
+
+    await user.click(saveButton())
+
+    await waitFor(() => expect(formProblems().map((p) => p.textContent)).toEqual([T['form.stale']]))
+    expect(router.state.location.pathname).toBe(EDIT_URL)
+    expect(textbox(T['clients.city']).value).toBe('Asti')
+    expect(db.clients['impresa-rossi']?.[0]?.city).toBe('Torino')
+    expect(screen.queryByText(T['clients.updated'])).toBeNull()
+  })
+
+  it('"Ricarica" loads the newer version into the form, and saving then works', async () => {
+    const { router, user } = await openEditForm()
+    const ferri = db.clients['impresa-rossi']?.[0]
+    if (!ferri) throw new Error('No Edil Ferri in the mock data')
+    // Someone else renames the client
+    ferri.name = 'Edil Ferri Nuova S.r.l.'
+    db.clientVersions.set(FERRI_ID, 2)
+    await user.click(saveButton())
+    await waitFor(() => expect(formProblems()).toHaveLength(1))
+
+    await user.click(screen.getByRole('button', { name: T['form.reload'] }))
+
+    await waitFor(() => expect(textbox(T['clients.name']).value).toBe('Edil Ferri Nuova S.r.l.'))
+    expect(formProblems()).toEqual([])
+    await user.click(saveButton())
+    await waitFor(() => expect(router.state.location.pathname).toBe(FERRI_URL))
+    expect(await screen.findByText(T['clients.updated'])).toBeTruthy()
   })
 })
 

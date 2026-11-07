@@ -1,11 +1,12 @@
 import { http, HttpResponse } from 'msw/http'
 import type { components } from '@/api/schema'
-import { companies, MOCK_PASSWORD, users } from './data'
+import { companies, dashboardFor, MOCK_PASSWORD, users } from './data'
 import { db } from './db'
 
 type Schemas = components['schemas']
 type Client = Schemas['Client']
 type ClientInput = Schemas['ClientInput']
+type ClientKind = Schemas['ClientKind']
 type Cookies = Record<string, string>
 
 // Any origin: the browser calls the page's own, tests call http://localhost
@@ -16,6 +17,7 @@ const CSRF_COOKIE = 'XSRF-TOKEN'
 const MAX_FAILED_LOGINS = 5
 const LOCK_MS = 60_000
 const SORTS = ['name', '-name', 'created_at', '-created_at']
+const KINDS: readonly string[] = ['company', 'person', 'public_body'] satisfies ClientKind[]
 // From the contract (ClientInput): the mock refuses what the backend would refuse
 const MAX_LENGTHS: Partial<Record<keyof ClientInput, number>> = {
   name: 200,
@@ -34,9 +36,38 @@ const SESSION_EXPIRED = 'Sessione scaduta: accedi di nuovo.'
 const BAD_CSRF = 'Token di sicurezza non valido: ricarica la pagina.'
 const NOT_FOUND = 'Non trovato, oppure non hai accesso.'
 const NOT_ALLOWED = 'Il tuo ruolo non permette questa azione.'
+const STALE =
+  'Il cliente è stato modificato da qualcun altro. Ricarica la scheda per vedere le modifiche.'
+const NO_VERSION = 'Manca la versione del cliente: ricarica la scheda e riprova.'
+const HAS_DOCUMENTS = 'Il cliente ha documenti collegati e non si può eliminare: puoi archiviarlo.'
 
-function error(status: number, message: string, headers?: HeadersInit) {
-  return HttpResponse.json({ message } satisfies Schemas['Error'], { status, headers })
+function error(status: number, message: string, headers?: HeadersInit, code?: string) {
+  return HttpResponse.json({ message, ...(code && { code }) } satisfies Schemas['Error'], {
+    status,
+    headers,
+  })
+}
+
+function etagOf(client: Client) {
+  return `"${db.clientVersions.get(client.id) ?? 1}"`
+}
+
+/** The client with its version in the ETag header, as the backend sends it. */
+function clientResponse(client: Client, status = 200) {
+  return HttpResponse.json(client, { status, headers: { ETag: etagOf(client) } })
+}
+
+/** Saves a change: the client gets the next version. */
+function bumpVersion(client: Client) {
+  db.clientVersions.set(client.id, (db.clientVersions.get(client.id) ?? 1) + 1)
+}
+
+/** 428 without If-Match, 412 when it is not the current version; null when it matches. */
+function checkVersion(request: Request, client: Client) {
+  const ifMatch = request.headers.get('If-Match')
+  if (!ifMatch) return error(428, NO_VERSION, undefined, 'precondition_required')
+  if (ifMatch !== etagOf(client)) return error(412, STALE, undefined, 'stale_record')
+  return null
 }
 
 function invalid(errors: Record<string, string[]>) {
@@ -102,8 +133,10 @@ function parseClient(
     const value = body[key]
     return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
   }
+  const kind = KINDS.includes(String(body.kind)) ? (body.kind as ClientKind) : 'company'
+  const country = text('country')?.toUpperCase() ?? null
   const input: ClientInput = {
-    kind: body.kind === 'person' ? 'person' : 'company',
+    kind,
     name: text('name') ?? '',
     vat_number: text('vat_number'),
     tax_code: text('tax_code'),
@@ -115,18 +148,31 @@ function parseClient(
     postal_code: text('postal_code'),
     city: text('city'),
     province: text('province'),
+    country: country ?? '',
     notes: text('notes'),
   }
   const errors: Record<string, string[]> = {}
-  if (body.kind !== 'company' && body.kind !== 'person') errors.kind = ['Scegli impresa o privato.']
+  if (!KINDS.includes(String(body.kind))) errors.kind = ['Tipo di cliente non valido.']
   if (!input.name) errors.name = ['Il nome è obbligatorio.']
-  if (body.kind === 'company' && !input.vat_number) {
-    errors.vat_number = ['La partita IVA è obbligatoria per le imprese.']
+  if (!('country' in body)) errors.country = ['Campo mancante.']
+  else if (!country) errors.country = ['Il paese è obbligatorio.']
+  else if (!/^[A-Z]{2}$/.test(country)) {
+    errors.country = ['Usa il codice di due lettere del paese, ad esempio IT.']
+  }
+  // The tax ids are required only for Italian clients
+  const italian = country === 'IT'
+  if (italian && kind !== 'person' && !input.vat_number && !input.tax_code) {
+    errors.vat_number = ['Indica la partita IVA o il codice fiscale.']
   } else if (input.vat_number && others.some((c) => c.vat_number === input.vat_number)) {
     errors.vat_number = ['Esiste già un cliente con questa partita IVA.']
   }
-  if (body.kind === 'person' && !input.tax_code) {
-    errors.tax_code = ['Il codice fiscale è obbligatorio per i privati.']
+  if (italian && kind === 'person' && !input.tax_code) {
+    errors.tax_code = ['Il codice fiscale è obbligatorio per un privato.']
+  }
+  if (input.sdi_code && input.sdi_code.length < 6) {
+    errors.sdi_code = [
+      'Il codice destinatario è di 7 caratteri, 6 per la pubblica amministrazione.',
+    ]
   }
   for (const key of ['email', 'pec'] as const) {
     if (input[key]?.includes('@') === false) errors[key] = ['Indirizzo non valido.']
@@ -136,6 +182,32 @@ function parseClient(
     if (value && value.length > max) errors[key] ??= [`Al massimo ${max} caratteri.`]
   }
   return Object.keys(errors).length > 0 ? { errors } : { input }
+}
+
+/** Today's date in Italy, as the backend counts it (YYYY-MM-DD). */
+function todayInItaly() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date())
+}
+
+/**
+ * The client named in the URL, for the requests that change it: 404 when the user cannot see
+ * it, 403 without `permission`, then 428 or 412 when If-Match is not the current version.
+ */
+function changeableClient(
+  request: Request,
+  cookies: Cookies,
+  params: Record<string, unknown>,
+  permission: Schemas['Permission'],
+) {
+  const company = String(params.company)
+  const permissions = guard(request, cookies, company, true)
+  if (permissions instanceof Response) return permissions
+  const clients = db.clients[company] ?? []
+  const index = clients.findIndex((c) => c.id === params.client)
+  const current = clients[index]
+  if (!current || !permissions.includes('clients.view')) return error(404, NOT_FOUND)
+  if (!permissions.includes(permission)) return error(403, NOT_ALLOWED)
+  return { clients, index, current }
 }
 
 // Only whole integers count: "2x" falls back to the default like "abc"
@@ -212,11 +284,16 @@ export const handlers = [
     const query = new URL(request.url).searchParams
     const sort = query.get('sort') ?? 'name'
     const kind = query.get('filter[kind]')
+    const archivedParam = query.get('filter[archived]')
     // Strict like a real backend, so a wrong parameter in the frontend shows up at once
     if (!SORTS.includes(sort)) return invalid({ sort: ['Ordinamento non valido.'] })
-    if (kind !== null && kind !== 'company' && kind !== 'person') {
+    if (kind !== null && !KINDS.includes(kind)) {
       return invalid({ 'filter.kind': ['Filtro non valido.'] })
     }
+    if (archivedParam !== null && archivedParam !== 'true' && archivedParam !== 'false') {
+      return invalid({ 'filter.archived': ['Filtro non valido.'] })
+    }
+    const archived = archivedParam === 'true'
     const page = intParam(query.get('page'), 1, Number.MAX_SAFE_INTEGER)
     const perPage = intParam(query.get('per_page'), 25, 100)
     const search = query.get('search')?.trim().toLowerCase() ?? ''
@@ -225,6 +302,7 @@ export const handlers = [
     const direction = sort.startsWith('-') ? -1 : 1
 
     const rows = (db.clients[company] ?? [])
+      .filter((c) => (c.archived_at !== null) === archived)
       .filter((c) => kind === null || c.kind === kind)
       .filter((c) =>
         [c.name, c.vat_number, c.tax_code, c.city].some((v) => v?.toLowerCase().includes(search)),
@@ -249,11 +327,12 @@ export const handlers = [
     const client: Client = {
       ...result.input,
       id: `${company}-${crypto.randomUUID()}`,
+      archived_at: null,
       created_at: now,
       updated_at: now,
     }
     clients.push(client)
-    return HttpResponse.json(client, { status: 201 })
+    return clientResponse(client, 201)
   }),
 
   http.get(path('/companies/:company/clients/:client'), ({ request, cookies, params }) => {
@@ -263,29 +342,85 @@ export const handlers = [
     const client = db.clients[company]?.find((c) => c.id === params.client)
     // Without the permission a client is as invisible as one from another company
     if (!client || !permissions.includes('clients.view')) return error(404, NOT_FOUND)
-    return HttpResponse.json(client)
+    return clientResponse(client)
   }),
 
+  // In the backend's order: 404, 403, 428 (no If-Match), 422, then 412 (an older version)
   http.put(path('/companies/:company/clients/:client'), async ({ request, cookies, params }) => {
-    const company = String(params.company)
-    const permissions = guard(request, cookies, company, true)
-    if (permissions instanceof Response) return permissions
-    const clients = db.clients[company] ?? []
-    const index = clients.findIndex((c) => c.id === params.client)
-    const current = clients[index]
-    if (!current || !permissions.includes('clients.view')) return error(404, NOT_FOUND)
-    if (!permissions.includes('clients.update')) return error(403, NOT_ALLOWED)
-
+    const found = changeableClient(request, cookies, params, 'clients.update')
+    if (found instanceof Response) return found
+    const { clients, index, current } = found
+    if (!request.headers.get('If-Match')) {
+      return error(428, NO_VERSION, undefined, 'precondition_required')
+    }
     const others = clients.filter((c) => c.id !== current.id)
     const result = parseClient(await readJson(request), others)
     if ('errors' in result) return invalid(result.errors)
+    const stale = checkVersion(request, current)
+    if (stale) return stale
     const updated: Client = {
       ...result.input,
       id: current.id,
+      archived_at: current.archived_at,
       created_at: current.created_at,
       updated_at: new Date().toISOString(),
     }
     clients[index] = updated
-    return HttpResponse.json(updated)
+    bumpVersion(updated)
+    return clientResponse(updated)
+  }),
+
+  http.delete(path('/companies/:company/clients/:client'), ({ request, cookies, params }) => {
+    const found = changeableClient(request, cookies, params, 'clients.delete')
+    if (found instanceof Response) return found
+    const { clients, index, current } = found
+    const refused = checkVersion(request, current)
+    if (refused) return refused
+    if (db.clientsWithDocuments.has(current.id)) {
+      return error(409, HAS_DOCUMENTS, undefined, 'has_documents')
+    }
+    clients.splice(index, 1)
+    db.clientVersions.delete(current.id)
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  // Archiving an archived client keeps its date; restoring an active one changes nothing else
+  ...(['archive', 'restore'] as const).map((action) =>
+    http.post(
+      path(`/companies/:company/clients/:client/${action}`),
+      ({ request, cookies, params }) => {
+        const found = changeableClient(request, cookies, params, 'clients.update')
+        if (found instanceof Response) return found
+        const { clients, index, current } = found
+        const refused = checkVersion(request, current)
+        if (refused) return refused
+        const now = new Date().toISOString()
+        const updated: Client = {
+          ...current,
+          archived_at: action === 'archive' ? (current.archived_at ?? now) : null,
+          updated_at: now,
+        }
+        clients[index] = updated
+        bumpVersion(updated)
+        return clientResponse(updated)
+      },
+    ),
+  ),
+
+  // Any member may ask; each section is null without its permission
+  http.get(path('/companies/:company/dashboard'), ({ request, cookies, params }) => {
+    const company = String(params.company)
+    const permissions = guard(request, cookies, company, false)
+    if (permissions instanceof Response) return permissions
+    const can = (permission: Schemas['Permission']) => permissions.includes(permission)
+    const full = dashboardFor(company, todayInItaly())
+    return HttpResponse.json({
+      today: full.today,
+      sites: can('sites.view') ? full.sites : null,
+      over_budget: can('sites.view') && can('costs.view') ? full.over_budget : null,
+      costs_this_month: can('costs.view') ? full.costs_this_month : null,
+      reports: can('reports.view') ? full.reports : null,
+      deadlines: can('deadlines.view') ? full.deadlines : null,
+    } satisfies Schemas['Dashboard'])
   }),
 ]

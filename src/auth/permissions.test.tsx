@@ -4,7 +4,7 @@ import { act, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import type { RouteObject } from 'react-router'
 import { describe, expect, it } from 'vitest'
-import { HomePage } from '@/app/HomePage'
+import { DashboardPage } from '@/features/dashboard/pages/DashboardPage'
 import { LoadingScreen } from '@/app/LoadingScreen'
 import { PageError, RouteError } from '@/app/RouteError'
 import { PermissionGate } from '@/components/common/PermissionGate'
@@ -65,7 +65,7 @@ function routesAround(page: RouteObject) {
               children: [
                 {
                   ErrorBoundary: PageError,
-                  children: [{ index: true, Component: HomePage }, page],
+                  children: [{ index: true, Component: DashboardPage }, page],
                 },
               ],
             },

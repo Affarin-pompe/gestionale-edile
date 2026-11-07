@@ -149,7 +149,9 @@ Il primo esempio è il cliente: `src/features/clients/` (scheda, nuovo, modifica
 - **Aspetto.** Come in Metronic: ogni `FormSection` è una card con il titolo nell'intestazione; dove la card è abbastanza larga l'etichetta sta a sinistra del campo, su telefono sopra. Il form è largo al massimo 620px e i pulsanti stanno in fondo a destra. Nella scheda ogni sezione è una card.
 - **Dopo il salvataggio** un avviso (sonner) conferma e si apre la scheda. La scheda prende la risposta del backend, e gli elenchi si ricaricano.
 - **Scheda e modifica** caricano il record nel loader della route, prima di aprirsi. Se l'API risponde 404 (record di un'altra azienda o inesistente), compare la pagina "non trovato o non accessibile" dentro il layout. Per questo `routes.ts` del modulo è una funzione che riceve il `queryClient`.
-- **Limiti attuali:** si esce da un form con modifiche non salvate senza nessun avviso, e non c'è controllo di modifiche fatte nel frattempo da altri.
+- **Modifiche fatte nel frattempo da altri.** La scheda tiene, insieme al record, la versione ricevuta dal backend (header `ETag`); modifica, archiviazione, ripristino ed eliminazione la rimandano in `If-Match`. Se nel frattempo qualcuno ha salvato, il backend risponde 412: `EntityForm` lo dice sopra i pulsanti, senza perdere quello che si è scritto, e offre "Ricarica", che porta nel form la versione nuova.
+- **Archiviare ed eliminare.** Dalla scheda, con i permessi giusti (`clients.update` per archiviare e ripristinare, `clients.delete` per eliminare). L'eliminazione chiede conferma; se il cliente ha documenti collegati (409) la finestra lo spiega e propone di archiviarlo. Gli archiviati si vedono nell'elenco con il filtro "Stato".
+- **Limiti attuali:** si esce da un form con modifiche non salvate senza nessun avviso.
 
 ## Struttura del codice
 

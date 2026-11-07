@@ -25,6 +25,7 @@ const clientInput: components['schemas']['ClientInput'] = {
   postal_code: null,
   city: null,
   province: null,
+  country: 'IT',
   notes: null,
 }
 
@@ -114,7 +115,7 @@ function createClientRequest(client: ApiClient) {
 
 function updateClientRequest(client: ApiClient) {
   return client.PUT('/api/companies/{company}/clients/{client}', {
-    params: { path: { company: COMPANY, client: CLIENT_ID } },
+    params: { path: { company: COMPANY, client: CLIENT_ID }, header: { 'If-Match': '"1"' } },
     body: clientInput,
   })
 }

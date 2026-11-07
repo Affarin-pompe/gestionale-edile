@@ -3,7 +3,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it } from 'vitest'
 import type { Me } from '@/auth/me'
-import { messages, type MessageId } from '@/i18n/it'
+import { messages } from '@/i18n/it'
 import { server } from '@/mocks/node'
 import {
   linkOutsideBreadcrumbs,
@@ -64,18 +64,22 @@ function menuGroups(root: ParentNode = document) {
     Array.from(group.querySelectorAll('[data-sidebar="menu-item"]'), (item) => item.textContent),
   ])
 }
-/** A planned module as the menu shows it: its name and "Presto". */
-const soon = (id: MessageId) => `${T[id]}${T['menu.soon']}`
-const PLANNED_REGISTRY = [soon('menu.suppliers'), soon('menu.employees'), soon('menu.vehicles')]
-const menuWith = (registry: (string | null)[]) => [
-  [null, [DASHBOARD]],
-  [
-    T['menu.work'],
-    [soon('menu.quotes'), soon('menu.estimates'), soon('menu.sites'), soon('menu.reports')],
-  ],
-  [T['menu.admin'], [soon('menu.deadlines'), soon('menu.costs')]],
-  [REGISTRY, registry],
-]
+// Built modules need permissions the mock users do not have, so they are hidden
+const PLANNED_REGISTRY: string[] = []
+const menuWith = (
+  registry: (string | null)[],
+  admin: string[] = [T['menu.deadlines'], T['menu.costs']],
+  work: string[] = [T['menu.sites'], T['menu.reports']],
+) =>
+  (
+    [
+      [null, [DASHBOARD]],
+      [T['menu.work'], work],
+      [T['menu.admin'], admin],
+      [REGISTRY, registry],
+      // A group with no item the user may see is not shown
+    ] as [string | null, (string | null)[]][]
+  ).filter(([, items]) => items.length > 0)
 /** The menu items that say "Presto". */
 const plannedItems = () =>
   Array.from(document.querySelectorAll('[data-sidebar="menu-item"]')).filter((item) =>
@@ -219,26 +223,33 @@ describe('the layout inside a company', () => {
 })
 
 describe('side menu', () => {
-  it.each([TITOLARE, UFFICIO, CAPOCANTIERE])(
+  it.each([
+    [TITOLARE, [T['menu.deadlines'], T['menu.costs']]],
+    [UFFICIO, [T['menu.deadlines'], T['menu.costs']]],
+    // Without costs.view: no Costi
+    [CAPOCANTIERE, [T['menu.deadlines']]],
+  ])(
     '%s sees Dashboard, Lavori, Amministrazione, and Clienti under Anagrafiche',
-    async (email) => {
+    async (email, admin) => {
       await signIn(email)
       renderApp('/impresa-rossi')
       await waitFor(() => menuLink(DASHBOARD))
 
       expect(menuLink(CLIENTS)).toBeTruthy()
-      expect(menuGroups()).toEqual(menuWith([CLIENTS, ...PLANNED_REGISTRY]))
+      expect(menuLink(T['menu.reports'])).toBeTruthy()
+      expect(menuGroups()).toEqual(menuWith([CLIENTS, ...PLANNED_REGISTRY], admin))
     },
   )
 
-  it('without clients.view in the company, Anagrafiche has only the planned modules, no Clienti', async () => {
+  it('without clients.view in the company, Anagrafiche shows no Clienti', async () => {
     server.use(http.get('*/api/me', () => HttpResponse.json(withoutClientsView)))
     renderApp('/impresa-rossi')
     await findHeading('Ciao, Paola Verdi')
 
     expect(menuLink(DASHBOARD)).toBeTruthy()
     expect(queryMenuLink(CLIENTS)).toBeNull()
-    expect(menuGroups()).toEqual(menuWith(PLANNED_REGISTRY))
+    // Without companies' permissions: no Scadenziario, Costi, Cantieri or Rapportini either
+    expect(menuGroups()).toEqual(menuWith(PLANNED_REGISTRY, [], []))
   })
 
   it.each([
@@ -250,12 +261,12 @@ describe('side menu', () => {
     await waitFor(() => menuLink(DASHBOARD))
 
     const planned = plannedItems()
-    expect(planned).toHaveLength(9)
+    expect(planned).toHaveLength(0)
     for (const item of planned) {
       expect(within(item as HTMLElement).getByText(T['menu.soon'])).toBeTruthy()
       expect(item.querySelector('a, button, [href], [tabindex]')).toBeNull()
     }
-    for (const id of ['menu.quotes', 'menu.sites', 'menu.costs', 'menu.vehicles'] as const) {
+    for (const id of ['menu.quotes'] as const) {
       expect(screen.queryByRole('link', { name: new RegExp(T[id]) })).toBeNull()
     }
   })

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Client, ClientInput } from './api'
 import { clientFormValues, clientSchema, type ClientFormValues } from './schemas'
 
-// The 13 fields of ClientInput in api/openapi.yaml: all of them are always sent
+// The 14 fields of ClientInput in api/openapi.yaml: all of them are always sent
 const INPUT_KEYS: (keyof ClientInput)[] = [
   'kind',
   'name',
@@ -16,6 +16,7 @@ const INPUT_KEYS: (keyof ClientInput)[] = [
   'postal_code',
   'city',
   'province',
+  'country',
   'notes',
 ]
 
@@ -46,6 +47,7 @@ const EMPTY: ClientFormValues = {
   postal_code: '',
   city: '',
   province: '',
+  country: 'IT',
   notes: '',
 }
 
@@ -73,7 +75,7 @@ function parse(values: ClientFormValues) {
 }
 
 describe('clientSchema, what it sends', () => {
-  it('trims the text and sends null for empty optional fields, with exactly the 13 contract keys', () => {
+  it('trims the text and sends null for empty optional fields, with exactly the 14 contract keys', () => {
     const values = {
       ...company({
         name: '  Edil Prova S.r.l. ',
@@ -102,6 +104,7 @@ describe('clientSchema, what it sends', () => {
       postal_code: null,
       city: 'Torino',
       province: null,
+      country: 'IT',
       notes: null,
     })
     expect(Object.keys(output).sort()).toEqual([...INPUT_KEYS].sort())
@@ -141,27 +144,40 @@ describe('clientSchema, required fields', () => {
     expect(errorsOf(company({ name: '    ' }))).toEqual({ name: ['validation.required'] })
   })
 
-  it('a company needs the VAT number, not the tax code', () => {
-    expect(errorsOf(company({ vat_number: '' }))).toEqual({ vat_number: ['clients.vatRequired'] })
-    expect(errorsOf(company({ vat_number: '   ' }))).toEqual({
-      vat_number: ['clients.vatRequired'],
-    })
-  })
+  it.each(['company', 'public_body'] as const)(
+    'an Italian %s needs the VAT number or the tax code, either one',
+    (kind) => {
+      const missing = { vat_number: ['clients.vatOrTaxCodeRequired'] }
+      expect(errorsOf(company({ kind, vat_number: '' }))).toEqual(missing)
+      expect(errorsOf(company({ kind, vat_number: '   ' }))).toEqual(missing)
+      expect(errorsOf(company({ kind, vat_number: '', tax_code: '90012345678' }))).toBeNull()
+      expect(errorsOf(company({ kind }))).toBeNull()
+    },
+  )
 
-  it('a person needs the tax code, not the VAT number', () => {
+  it('an Italian person needs the tax code, not the VAT number', () => {
     const person = { ...EMPTY, kind: 'person' as const, name: 'Mario Bianchi' }
-
     expect(errorsOf(person)).toEqual({ tax_code: ['clients.taxCodeRequired'] })
     expect(errorsOf({ ...person, tax_code: ' ' })).toEqual({
+      tax_code: ['clients.taxCodeRequired'],
+    })
+    expect(errorsOf({ ...person, vat_number: '01234567890' })).toEqual({
       tax_code: ['clients.taxCodeRequired'],
     })
     expect(errorsOf({ ...person, tax_code: 'BNCMRA80A01L219X' })).toBeNull()
   })
 
-  it('reports the missing VAT number together with an empty name', () => {
+  it.each(['company', 'public_body', 'person'] as const)(
+    'a foreign %s needs neither tax id',
+    (kind) => {
+      expect(errorsOf({ ...EMPTY, kind, name: 'Bau Prova GmbH', country: 'DE' })).toBeNull()
+    },
+  )
+
+  it('reports the missing tax ids together with an empty name', () => {
     expect(errorsOf({ ...EMPTY })).toEqual({
       name: ['validation.required'],
-      vat_number: ['clients.vatRequired'],
+      vat_number: ['clients.vatOrTaxCodeRequired'],
     })
   })
 
@@ -172,17 +188,40 @@ describe('clientSchema, required fields', () => {
     })
   })
 
-  it('reports the missing VAT number together with an invalid email', () => {
+  it('reports the missing tax ids together with an invalid email', () => {
     expect(errorsOf(company({ vat_number: '', email: 'non-una-email' }))).toEqual({
-      vat_number: ['clients.vatRequired'],
+      vat_number: ['clients.vatOrTaxCodeRequired'],
       email: ['validation.email'],
     })
   })
 
-  it('reports the missing VAT number together with a text that is too long', () => {
+  it('reports the missing tax ids together with a text that is too long', () => {
     expect(errorsOf(company({ vat_number: '', city: 'x'.repeat(101) }))).toEqual({
-      vat_number: ['clients.vatRequired'],
+      vat_number: ['clients.vatOrTaxCodeRequired'],
       city: ['validation.tooLong'],
+    })
+  })
+})
+
+describe('clientSchema, country', () => {
+  it('is required', () => {
+    expect(errorsOf(company({ country: '  ' }))).toMatchObject({
+      country: ['validation.required'],
+    })
+  })
+
+  it('is sent in upper case, without spaces', () => {
+    expect(parse(company({ country: ' de ' })).country).toBe('DE')
+    expect(parse(company({ country: 'it' })).country).toBe('IT')
+  })
+
+  it.each(['ITA', 'I', '1T', 'I-'])('refuses %s, which is not a two-letter code', (country) => {
+    expect(errorsOf(company({ country }))).toMatchObject({ country: ['clients.countryInvalid'] })
+  })
+
+  it('a lower-case "it" is Italy: the tax ids are required', () => {
+    expect(errorsOf(company({ country: 'it', vat_number: '' }))).toEqual({
+      vat_number: ['clients.vatOrTaxCodeRequired'],
     })
   })
 })
@@ -214,7 +253,15 @@ describe('clientSchema, lengths and addresses', () => {
     )
   })
 
-  it('accepts a kind only among company and person', () => {
+  it('the SDI code has 7 characters, or 6 for the public administration', () => {
+    expect(parse(company({ sdi_code: 'UFABC1' })).sdi_code).toBe('UFABC1')
+    expect(parse(company({ sdi_code: 'ABC1234' })).sdi_code).toBe('ABC1234')
+    expect(errorsOf(company({ sdi_code: 'ABC12' }))).toEqual({
+      sdi_code: ['clients.sdiCodeLength'],
+    })
+  })
+
+  it('accepts a kind only among company, public body and person', () => {
     const values = { ...company(), kind: 'ente' } as unknown as ClientFormValues
 
     expect(errorsOf(values)).toMatchObject({ kind: ['validation.required'] })
@@ -241,7 +288,9 @@ describe('clientFormValues', () => {
       postal_code: '10121',
       city: 'Torino',
       province: null,
+      country: 'IT',
       notes: null,
+      archived_at: null,
       created_at: '2026-01-01T09:00:00.000Z',
       updated_at: '2026-01-02T09:00:00.000Z',
     }
@@ -259,6 +308,7 @@ describe('clientFormValues', () => {
       postal_code: '10121',
       city: 'Torino',
       province: '',
+      country: 'IT',
       notes: '',
     })
   })
@@ -277,9 +327,10 @@ describe('clientFormValues', () => {
       postal_code: null,
       city: null,
       province: 'TO',
+      country: 'IT',
       notes: null,
     }
-    const client: Client = { ...input, id: 'x', created_at: '', updated_at: '' }
+    const client: Client = { ...input, id: 'x', archived_at: null, created_at: '', updated_at: '' }
 
     expect(parse(clientFormValues(client))).toEqual(input)
   })

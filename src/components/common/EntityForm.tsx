@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { useId, useState, type ReactNode } from 'react'
+import { Fragment, useId, useState, type ReactNode } from 'react'
 import {
   FormProvider,
   useFormContext,
@@ -10,6 +10,7 @@ import {
 import { FormattedMessage, useIntl } from 'react-intl'
 import { Link } from 'react-router'
 import { ApiError, fieldErrors } from '@/api/errors'
+import { applyFieldErrors } from './form-errors'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -23,7 +24,11 @@ import {
   FieldSet,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import {
+  NativeSelect,
+  NativeSelectOptGroup,
+  NativeSelectOption,
+} from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import { listHref } from '@/hooks/use-list-params'
 import { isMessageId, type MessageId } from '@/i18n/it'
@@ -35,21 +40,30 @@ import { isMessageId, type MessageId } from '@/i18n/it'
 export function EntityForm<TValues extends FieldValues, TOutput>({
   form,
   onSubmit,
+  onReload,
   cancelTo,
   children,
 }: {
   form: UseFormReturn<TValues, unknown, TOutput>
   /** Saves; a thrown ApiError is shown on the form. */
   onSubmit: (values: TOutput) => Promise<void>
+  /**
+   * Loads the record again, after a 412 (someone else changed it in the meantime). Without it
+   * the message only asks to reload the page.
+   */
+  onReload?: () => Promise<void>
   /** Where Cancel goes; a list reopens as the user left it. */
   cancelTo: string
   children: ReactNode
 }) {
-  const intl = useIntl()
   const [problem, setProblem] = useState<string>()
+  const intl = useIntl()
+  const [stale, setStale] = useState(false)
+  const [reloading, setReloading] = useState(false)
 
   const submit = form.handleSubmit(async (values) => {
     setProblem(undefined)
+    setStale(false)
     try {
       await onSubmit(values)
     } catch (error) {
@@ -57,25 +71,32 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
     }
   })
 
+  async function reload() {
+    if (!onReload) return
+    setReloading(true)
+    try {
+      await onReload()
+      setProblem(undefined)
+      setStale(false)
+    } catch {
+      setProblem(intl.formatMessage({ id: 'form.reloadFailed' }))
+    } finally {
+      setReloading(false)
+    }
+  }
+
   /** Puts the error on the fields it names; returns what to show above the buttons. */
   function showError(error: unknown) {
     if (!(error instanceof ApiError)) return intl.formatMessage({ id: 'form.failed' })
     if (error.status === 403) return intl.formatMessage({ id: 'form.forbidden' })
+    // 412: someone else saved first. 428: the version was missing. Reloading fixes both.
+    if (error.status === 412 || error.status === 428) {
+      setStale(true)
+      return intl.formatMessage({ id: onReload ? 'form.stale' : 'form.staleReloadPage' })
+    }
     if (error.status !== 422) return intl.formatMessage({ id: 'form.failed' })
 
-    const errors = fieldErrors(error)
-    // The form's fields in their order on screen, so the cursor goes to the first wrong one
-    const known = Object.keys(form.getValues())
-    let focused = false
-    for (const name of known) {
-      const message = errors[name]
-      if (message === undefined) continue
-      form.setError(name as Path<TValues>, { type: 'server', message }, { shouldFocus: !focused })
-      focused = true
-    }
-    const others = Object.entries(errors)
-      .filter(([name]) => !known.includes(name))
-      .map(([, message]) => message)
+    const { focused, others } = applyFieldErrors(form, fieldErrors(error))
     // Messages for fields the form does not have still need to be seen
     if (others.length > 0) return others.join(' ')
     return focused ? undefined : intl.formatMessage({ id: 'form.invalid' })
@@ -89,9 +110,21 @@ export function EntityForm<TValues extends FieldValues, TOutput>({
         </p>
         {children}
         {problem && (
-          <p role="alert" className="text-sm text-destructive">
-            {problem}
-          </p>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <p role="alert" className="text-sm text-destructive">
+              {problem}
+            </p>
+            {stale && onReload && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={reloading}
+                onClick={() => void reload()}
+              >
+                <FormattedMessage id="form.reload" />
+              </Button>
+            )}
+          </div>
         )}
         <div className="flex flex-wrap justify-end gap-2.5">
           <Button asChild variant="outline">
@@ -184,15 +217,21 @@ export function TextField<TValues extends FieldValues>({
   multiline = false,
   maxLength,
   autoComplete,
+  deps,
+  inputMode,
   ...props
 }: FieldProps<TValues> & {
-  type?: 'text' | 'email' | 'tel'
+  type?: 'text' | 'email' | 'tel' | 'date'
   multiline?: boolean
   maxLength?: number
   autoComplete?: string
+  /** Fields whose checks depend on this one, checked again when it changes. */
+  deps?: Path<TValues>[]
+  /** The phone's keyboard, e.g. 'decimal' for amounts and quantities. */
+  inputMode?: 'decimal' | 'numeric'
 }) {
   const parts = useFieldParts(props)
-  const field = parts.register(props.name)
+  const field = parts.register(props.name, { deps })
   return (
     <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
       {parts.label}
@@ -206,6 +245,8 @@ export function TextField<TValues extends FieldValues>({
             type={type}
             maxLength={maxLength}
             autoComplete={autoComplete}
+            inputMode={inputMode}
+            className={type === 'date' ? 'w-full sm:w-44' : undefined}
           />
         )}
         {parts.after}
@@ -240,6 +281,142 @@ export function SelectField<TValues extends FieldValues>({
             </NativeSelectOption>
           ))}
         </NativeSelect>
+        {parts.after}
+      </FieldContent>
+    </Field>
+  )
+}
+
+/** A choice among records or values whose names are data, not texts of src/i18n. */
+export function ChoiceField<TValues extends FieldValues>({
+  options,
+  empty,
+  ...props
+}: FieldProps<TValues> & {
+  options: readonly { value: string; text: string }[]
+  /** The first option, for "none"; without it a value must be chosen. */
+  empty?: MessageId
+}) {
+  const intl = useIntl()
+  const parts = useFieldParts(props)
+  return (
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
+      {parts.label}
+      <FieldContent className="min-w-0 gap-1.5">
+        <NativeSelect className="w-full" {...parts.control} {...parts.register(props.name)}>
+          {empty && (
+            <NativeSelectOption value="">{intl.formatMessage({ id: empty })}</NativeSelectOption>
+          )}
+          {options.map((option) => (
+            <NativeSelectOption key={option.value} value={option.value}>
+              {option.text}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        {parts.after}
+      </FieldContent>
+    </Field>
+  )
+}
+
+/** A select whose options come from data (e.g. the names of the suppliers), in groups. */
+export function OptionsField<TValues extends FieldValues>({
+  groups,
+  empty,
+  ...props
+}: FieldProps<TValues> & {
+  groups: readonly { label?: MessageId; options: readonly { value: string; text: string }[] }[]
+  /** The first option, for no choice: its value is ''. */
+  empty?: MessageId
+}) {
+  const intl = useIntl()
+  const parts = useFieldParts(props)
+  return (
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
+      {parts.label}
+      <FieldContent className="min-w-0 gap-1.5">
+        <NativeSelect className="w-full" {...parts.control} {...parts.register(props.name)}>
+          {empty && (
+            <NativeSelectOption value="">{intl.formatMessage({ id: empty })}</NativeSelectOption>
+          )}
+          {groups.map((group, index) => {
+            const options = group.options.map((option) => (
+              <NativeSelectOption key={option.value} value={option.value}>
+                {option.text}
+              </NativeSelectOption>
+            ))
+            return group.label ? (
+              <NativeSelectOptGroup
+                key={group.label}
+                label={intl.formatMessage({ id: group.label })}
+              >
+                {options}
+              </NativeSelectOptGroup>
+            ) : (
+              <Fragment key={index}>{options}</Fragment>
+            )
+          })}
+        </NativeSelect>
+        {parts.after}
+      </FieldContent>
+    </Field>
+  )
+}
+
+const CHECKBOX = 'size-4 shrink-0 accent-primary'
+
+/** A yes-or-no field, such as "Subappaltatore": the label on the left, the box on the right. */
+export function CheckboxField<TValues extends FieldValues>(props: FieldProps<TValues>) {
+  const parts = useFieldParts(props)
+  return (
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
+      {parts.label}
+      <FieldContent className="min-w-0 gap-1.5">
+        <input
+          type="checkbox"
+          className={CHECKBOX}
+          {...parts.control}
+          {...parts.register(props.name)}
+        />
+        {parts.after}
+      </FieldContent>
+    </Field>
+  )
+}
+
+/** Several choices out of a short list, each with its box; the value is the chosen ones. */
+export function CheckboxGroupField<TValues extends FieldValues>({
+  options,
+  ...props
+}: FieldProps<TValues> & { options: readonly { value: string; label: MessageId }[] }) {
+  const intl = useIntl()
+  const parts = useFieldParts(props)
+  const field = parts.register(props.name)
+  return (
+    <Field data-invalid={parts.invalid} className={cn(ROW, props.className)}>
+      <span className={cn('text-sm leading-snug font-medium', ROW_LABEL)} aria-hidden="true">
+        <FormattedMessage id={props.label} />
+      </span>
+      <FieldContent className="min-w-0 gap-1.5">
+        <div
+          role="group"
+          aria-label={intl.formatMessage({ id: props.label })}
+          aria-describedby={parts.control['aria-describedby']}
+          className="flex flex-col gap-2"
+        >
+          {options.map((option) => (
+            <label key={option.value} className="flex items-center gap-2.5 text-sm">
+              <input
+                type="checkbox"
+                className={CHECKBOX}
+                value={option.value}
+                aria-invalid={parts.control['aria-invalid']}
+                {...field}
+              />
+              <FormattedMessage id={option.label} />
+            </label>
+          ))}
+        </div>
         {parts.after}
       </FieldContent>
     </Field>

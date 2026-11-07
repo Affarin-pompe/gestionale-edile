@@ -5,8 +5,17 @@ import { NoCompanyPage } from '@/auth/NoCompanyPage'
 import { homeLoader, loginAction, logoutAction, requireAuth, requireCompany } from '@/auth/session'
 import { AppLayout } from '@/layouts/AppLayout'
 import { clientRoutes } from '@/features/clients/routes'
+import { costRoutes } from '@/features/costs/routes'
+import { reportRoutes } from '@/features/daily-reports/routes'
+import { dashboardRoutes } from '@/features/dashboard/routes'
+import { estimateRoutes } from '@/features/estimates/routes'
+import { quoteRoutes } from '@/features/quotes/routes'
+import { siteRoutes } from '@/features/sites/routes'
+import { deadlineRoutes } from '@/features/deadlines/routes'
+import { employeeRoutes } from '@/features/employees/routes'
+import { supplierRoutes } from '@/features/suppliers/routes'
+import { vehicleRoutes } from '@/features/vehicles/routes'
 import { AuthLayout } from '@/layouts/AuthLayout'
-import { HomePage } from './HomePage'
 import { LoadingScreen } from './LoadingScreen'
 import { PageError, RouteError } from './RouteError'
 import type { RouteHandle } from './route-handle'
@@ -40,8 +49,17 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                   // Errors of a page show inside the layout
                   ErrorBoundary: PageError,
                   children: [
-                    { index: true, Component: HomePage },
+                    ...dashboardRoutes(),
                     ...clientRoutes(queryClient),
+                    ...quoteRoutes(queryClient),
+                    ...estimateRoutes(queryClient),
+                    ...siteRoutes(queryClient),
+                    ...reportRoutes(queryClient),
+                    ...deadlineRoutes(queryClient),
+                    ...costRoutes(queryClient),
+                    ...supplierRoutes(queryClient),
+                    ...employeeRoutes(queryClient),
+                    ...vehicleRoutes(queryClient),
                     {
                       path: '*',
                       handle: { crumb: 'crumb.notFound' } satisfies RouteHandle,
