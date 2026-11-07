@@ -68,14 +68,17 @@ function menuGroups(root: ParentNode = document) {
 const soon = (id: MessageId) => `${T[id]}${T['menu.soon']}`
 // Built modules need permissions the mock users do not have, so they are hidden
 const PLANNED_REGISTRY: string[] = []
+// The mock users see Cantieri (sites.view), the user without the companies' permissions not
+const WORK_WITH_SITES = [T['menu.sites'], soon('menu.reports')]
 const menuWith = (
   registry: (string | null)[],
   admin: string[] = [T['menu.deadlines'], soon('menu.costs')],
+  work: string[] = WORK_WITH_SITES,
 ) =>
   (
     [
       [null, [DASHBOARD]],
-      [T['menu.work'], [soon('menu.sites'), soon('menu.reports')]],
+      [T['menu.work'], work],
       [T['menu.admin'], admin],
       [REGISTRY, registry],
       // A group with no item the user may see is not shown
@@ -244,7 +247,9 @@ describe('side menu', () => {
     expect(menuLink(DASHBOARD)).toBeTruthy()
     expect(queryMenuLink(CLIENTS)).toBeNull()
     // Without companies' permissions: no Scadenziario either
-    expect(menuGroups()).toEqual(menuWith(PLANNED_REGISTRY, [soon('menu.costs')]))
+    expect(menuGroups()).toEqual(
+      menuWith(PLANNED_REGISTRY, [soon('menu.costs')], [soon('menu.reports')]),
+    )
   })
 
   it.each([
@@ -256,12 +261,12 @@ describe('side menu', () => {
     await waitFor(() => menuLink(DASHBOARD))
 
     const planned = plannedItems()
-    expect(planned).toHaveLength(3)
+    expect(planned).toHaveLength(2)
     for (const item of planned) {
       expect(within(item as HTMLElement).getByText(T['menu.soon'])).toBeTruthy()
       expect(item.querySelector('a, button, [href], [tabindex]')).toBeNull()
     }
-    for (const id of ['menu.quotes', 'menu.sites', 'menu.costs'] as const) {
+    for (const id of ['menu.quotes', 'menu.reports', 'menu.costs'] as const) {
       expect(screen.queryByRole('link', { name: new RegExp(T[id]) })).toBeNull()
     }
   })
