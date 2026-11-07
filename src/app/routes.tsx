@@ -6,6 +6,8 @@ import { homeLoader, loginAction, logoutAction, requireAuth, requireCompany } fr
 import { AppLayout } from '@/layouts/AppLayout'
 import { clientRoutes } from '@/features/clients/routes'
 import { dashboardRoutes } from '@/features/dashboard/routes'
+import { estimateRoutes } from '@/features/estimates/routes'
+import { quoteRoutes } from '@/features/quotes/routes'
 import { AuthLayout } from '@/layouts/AuthLayout'
 import { LoadingScreen } from './LoadingScreen'
 import { PageError, RouteError } from './RouteError'
@@ -42,6 +44,8 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                   children: [
                     ...dashboardRoutes(),
                     ...clientRoutes(queryClient),
+                    ...quoteRoutes(queryClient),
+                    ...estimateRoutes(queryClient),
                     {
                       path: '*',
                       handle: { crumb: 'crumb.notFound' } satisfies RouteHandle,
