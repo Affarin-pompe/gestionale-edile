@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { components } from '@/api/schema'
 import { messages } from '@/i18n/it'
 import { server } from '@/mocks/node'
+import { DASHBOARD_NOT_SHOWN, NO_SITE_ALERTS } from '@/mocks/data'
 import { renderApp, setupAppTests, signIn } from '@/test/app'
 import { countRequests } from '@/test/cookies'
 
@@ -27,7 +28,8 @@ const querySection = (name: string) => screen.queryByRole('heading', { name, lev
 
 const FIXED: Dashboard = {
   today: '2026-11-07',
-  sites: { planned: 2, active: 5, suspended: 1, completed: 12 },
+  today_holiday: false,
+  sites: { planned: 2, active: 5, suspended: 1, completed: 12, ...NO_SITE_ALERTS },
   over_budget: [
     {
       site: { id: 's1', name: 'Ristrutturazione bagno', code: 'C-002' },
@@ -37,12 +39,13 @@ const FIXED: Dashboard = {
     },
   ],
   costs_this_month: { month: '2026-11', total: '1234567.89' },
-  reports: { to_approve: 3, drafts: 0 },
+  reports: { to_approve: 3, drafts: 0, missing_today: 0, missing_week: 0 },
   deadlines: [
     {
       id: 'd1',
       title: 'F24 ritenute',
       due_on: '2026-11-03',
+      working_due_on: '2026-11-03',
       kind: 'tax',
       amount: '4123.00',
       overdue: true,
@@ -51,11 +54,13 @@ const FIXED: Dashboard = {
       id: 'd2',
       title: 'Revisione autocarro',
       due_on: '2026-11-11',
+      working_due_on: '2026-11-11',
       kind: 'vehicle',
       amount: null,
       overdue: false,
     },
   ],
+  ...DASHBOARD_NOT_SHOWN,
 }
 
 async function open(email = TITOLARE, answer?: Dashboard) {

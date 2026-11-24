@@ -5,3 +5,5 @@ coverage
 src/api/schema.d.ts
 # Docs are hand-written prose and tables: leave their layout alone
 *.md
+# Copy of the backend contract: kept byte for byte as the backend writes it
+api/openapi.yaml

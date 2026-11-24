@@ -30,13 +30,17 @@ export const DEADLINE_KINDS = [
   'invoice_out',
   'contract',
   'vehicle',
+  'medical_check',
+  'training',
   'other',
 ] as const satisfies readonly DeadlineKind[]
 export const DEADLINE_STATUSES = ['open', 'done'] as const satisfies readonly DeadlineStatus[]
 export const DEADLINE_RECURRENCES = [
   'monthly',
   'quarterly',
+  'semiannual',
   'yearly',
+  'biennial',
 ] as const satisfies readonly DeadlineRecurrence[]
 /** The most the contract gives in one page: the calendar asks for a month at once. */
 export const MAX_PER_PAGE = 100

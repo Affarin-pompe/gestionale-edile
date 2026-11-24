@@ -29,12 +29,14 @@ const twoRoles: Me = {
   companies: [
     {
       slug: 'impresa-rossi',
+      has_logo: false,
       name: 'Impresa Rossi S.r.l.',
       role: 'Titolare',
       permissions: ['clients.view', 'clients.create', 'clients.update'],
     },
     {
       slug: 'costruzioni-verdi',
+      has_logo: false,
       name: 'Costruzioni Verdi S.p.A.',
       role: 'Consulente',
       permissions: ['clients.view'],
