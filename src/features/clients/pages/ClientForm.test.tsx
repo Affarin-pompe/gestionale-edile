@@ -425,6 +425,7 @@ describe('new client, answers of the backend', () => {
       companies: [
         {
           slug: 'impresa-rossi',
+          has_logo: false,
           name: 'Impresa Rossi S.r.l.',
           role: 'Capo cantiere',
           permissions: ['clients.view', 'clients.create'],

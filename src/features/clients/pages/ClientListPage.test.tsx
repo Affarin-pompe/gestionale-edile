@@ -808,6 +808,7 @@ describe('route, menu and company', () => {
     companies: [
       {
         slug: 'impresa-rossi',
+        has_logo: false,
         name: 'Impresa Rossi S.r.l.',
         role: 'Contabile',
         permissions: ['clients.create', 'clients.update'],

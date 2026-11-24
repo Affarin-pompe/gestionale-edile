@@ -193,6 +193,41 @@ function addDays(today: string, days: number) {
 }
 
 /**
+ * Sections of the dashboard the screens do not show yet: the mocks leave them empty, as the
+ * backend does without the permissions.
+ */
+export const DASHBOARD_NOT_SHOWN = {
+  costs_by_month: null,
+  site_progress: null,
+  invoices: null,
+  vat: null,
+  progress_statements: null,
+  quotes: null,
+  purchase_orders: null,
+  warehouse: null,
+  subcontractors: null,
+  vehicles: null,
+  employees: null,
+  activities: null,
+  absences: null,
+} as const satisfies Partial<Dashboard>
+
+/** No site needs attention: the counters of the dashboard the screens do not show yet. */
+export const NO_SITE_ALERTS = {
+  without_prior_notice: 0,
+  past_end: 0,
+  ending_soon: 0,
+  start_due: 0,
+  without_team: 0,
+  without_permit: 0,
+  without_safety_coordinator: 0,
+  without_works_director: 0,
+  without_budget: 0,
+  without_location: 0,
+  without_client: 0,
+} as const
+
+/**
  * The full dashboard of a company on a given day; the handler blanks the sections the user
  * may not see. Deadlines are around that day, so some are always overdue.
  */
@@ -200,16 +235,19 @@ export function dashboardFor(company: string, today: string): Dashboard {
   if (company !== 'impresa-rossi') {
     return {
       today,
-      sites: { planned: 0, active: 0, suspended: 0, completed: 0 },
+      today_holiday: false,
+      sites: { planned: 0, active: 0, suspended: 0, completed: 0, ...NO_SITE_ALERTS },
       over_budget: [],
       costs_this_month: { month: today.slice(0, 7), total: '0.00' },
-      reports: { to_approve: 0, drafts: 0 },
+      reports: { to_approve: 0, drafts: 0, missing_today: 0, missing_week: 0 },
       deadlines: [],
+      ...DASHBOARD_NOT_SHOWN,
     }
   }
   return {
     today,
-    sites: { planned: 2, active: 5, suspended: 1, completed: 12 },
+    today_holiday: false,
+    sites: { planned: 2, active: 5, suspended: 1, completed: 12, ...NO_SITE_ALERTS },
     over_budget: [
       {
         site: { id: 'cantiere-002', name: 'Ristrutturazione bagno Via Po', code: 'C-2026-002' },
@@ -225,12 +263,13 @@ export function dashboardFor(company: string, today: string): Dashboard {
       },
     ],
     costs_this_month: { month: today.slice(0, 7), total: '48210.75' },
-    reports: { to_approve: 3, drafts: 2 },
+    reports: { to_approve: 3, drafts: 2, missing_today: 0, missing_week: 0 },
     deadlines: [
       {
         id: 'scadenza-001',
         title: 'DURC – Idraulica Prova S.n.c.',
         due_on: addDays(today, -6),
+        working_due_on: addDays(today, -6),
         kind: 'durc',
         amount: null,
         overdue: true,
@@ -239,6 +278,7 @@ export function dashboardFor(company: string, today: string): Dashboard {
         id: 'scadenza-002',
         title: 'F24 ritenute e contributi',
         due_on: addDays(today, -2),
+        working_due_on: addDays(today, -2),
         kind: 'tax',
         amount: '4123.00',
         overdue: true,
@@ -247,6 +287,7 @@ export function dashboardFor(company: string, today: string): Dashboard {
         id: 'scadenza-003',
         title: 'Revisione autocarro',
         due_on: addDays(today, 4),
+        working_due_on: addDays(today, 4),
         kind: 'vehicle',
         amount: '89.00',
         overdue: false,
@@ -255,10 +296,12 @@ export function dashboardFor(company: string, today: string): Dashboard {
         id: 'scadenza-004',
         title: 'Pagamento fattura Laterizi Prova S.r.l.',
         due_on: addDays(today, 7),
+        working_due_on: addDays(today, 7),
         kind: 'invoice_in',
         amount: '7350.00',
         overdue: false,
       },
     ],
+    ...DASHBOARD_NOT_SHOWN,
   }
 }

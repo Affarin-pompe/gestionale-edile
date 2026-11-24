@@ -67,6 +67,7 @@ describe('unwrap', () => {
       companies: [
         {
           slug: COMPANY,
+          has_logo: false,
           name: 'Impresa Rossi S.r.l.',
           role: 'Titolare',
           permissions: ['clients.view'],

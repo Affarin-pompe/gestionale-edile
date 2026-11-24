@@ -62,8 +62,13 @@ export interface paths {
         /**
          * Accesso con email e password
          * @description Se va a buon fine, il backend crea una nuova sessione e invalida la precedente.
-         *     Con credenziali sbagliate risponde 422 con un messaggio generico sul campo email,
-         *     senza rivelare se l'email esiste.
+         *     Un'email inesistente, una password sbagliata e un utente disattivato hanno la stessa
+         *     risposta: 422 con lo stesso messaggio generico sul campo email, senza rivelare se
+         *     l'email esiste o se l'account è disattivato. Anche i tempi sono simili: il backend
+         *     verifica sempre una password con argon2, su un hash fittizio quando l'email non c'è.
+         *     Un utente disattivato non entra, nemmeno con la password giusta, e le sue sessioni
+         *     aperte smettono di valere (401). Ognuno di questi casi conta come tentativo fallito:
+         *     dopo troppi, per email o per indirizzo IP, la risposta è 429 con Retry-After.
          */
         post: operations["login"];
         delete?: never;
@@ -86,7 +91,10 @@ export interface paths {
          * @description Serve il token CSRF (come per l'accesso). Se l'email è di un account attivo il backend
          *     manda un messaggio con il link /password-dimenticata/{token}, valido un'ora e una volta
          *     sola; al massimo 3 messaggi l'ora per account. La risposta è sempre 204, anche per
-         *     un'email sconosciuta: non rivela quali account esistono.
+         *     un'email sconosciuta e anche se l'invio del messaggio non riesce: non rivela quali
+         *     account esistono. Oltre il limite per account, che è silenzioso, c'è quello per
+         *     indirizzo IP: dopo 10 richieste in 15 minuti, per qualunque email, la risposta è 429
+         *     con Retry-After.
          */
         post: operations["requestPasswordReset"];
         delete?: never;
@@ -111,6 +119,9 @@ export interface paths {
          * @description Serve il token CSRF. Con un link valido la password cambia, tutte le sessioni
          *     dell'account si chiudono e gli altri link inviati smettono di funzionare; poi si
          *     accede con la nuova password. Un link sconosciuto, già usato o scaduto risponde 404.
+         *     Un link che non funziona (404) conta come tentativo fallito per l'indirizzo IP: dopo
+         *     20 in 15 minuti la risposta è 429 con Retry-After, anche per un link valido. Il
+         *     limite è comune ai link di password dimenticata, invito e cambio email.
          */
         post: operations["resetPassword"];
         delete?: never;
@@ -150,7 +161,7 @@ export interface paths {
         get: operations["getMe"];
         /**
          * Cambio del proprio nome
-         * @description L'email non si cambia da qui.
+         * @description L'email non si cambia da qui, ma con POST /api/me/email.
          */
         put: operations["updateMe"];
         post?: never;
@@ -183,6 +194,113 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cambio della propria email, richiesta del link di conferma
+         * @description Serve la password attuale: se è sbagliata la risposta è 422 sul campo
+         *     current_password e conta come tentativo di accesso fallito (dopo troppi, 429).
+         *     L'email non cambia subito: al nuovo indirizzo arriva un messaggio con il link
+         *     /conferma-email/{token}, valido 24 ore e una volta sola; al vecchio indirizzo arriva
+         *     un avviso. Una nuova richiesta annulla i link precedenti; al massimo 3 richieste l'ora.
+         *     Un indirizzo uguale a quello attuale o già usato da un altro account risponde 422 su
+         *     new_email. Se il messaggio con il link non parte, la risposta è 503 con code
+         *     email_not_sent e non cambia nulla: i link precedenti restano validi e si può riprovare.
+         */
+        post: operations["requestEmailChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/email-change/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Conferma della nuova email
+         * @description Serve il token CSRF, non la sessione: il link si può aprire anche da un altro
+         *     dispositivo. Con un link valido l'email dell'account diventa quella nuova (per
+         *     accedere si usa da subito la nuova) e le sessioni restano aperte. Un link
+         *     sconosciuto, già usato, scaduto o di un account disattivato risponde 404; se nel
+         *     frattempo l'indirizzo è stato preso da un altro account, 409 con code email_in_use.
+         *     Un link che non funziona (404) conta come tentativo fallito per l'indirizzo IP: dopo
+         *     20 in 15 minuti la risposta è 429 con Retry-After, anche per un link valido. Il
+         *     limite è comune ai link di password dimenticata, invito e cambio email.
+         */
+        post: operations["confirmEmailChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Accessi aperti dell'utente
+         * @description Le sessioni ancora valide dell'utente, su tutti i dispositivi, senza paginazione:
+         *     prima quella da cui arriva la richiesta (current true), poi dalla più usata di
+         *     recente. user_agent è il browser che ha fatto l'accesso (null per gli accessi più
+         *     vecchi); last_used_at si aggiorna al massimo ogni cinque minuti.
+         */
+        get: operations["listMySessions"];
+        put?: never;
+        post?: never;
+        /**
+         * Uscita da tutti gli altri dispositivi
+         * @description Chiude tutte le sessioni dell'utente tranne quella da cui arriva la richiesta.
+         */
+        delete: operations["closeOtherSessions"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/sessions/{session}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Chiusura di un accesso
+         * @description Chiude una sessione dell'utente da un altro dispositivo. Una sessione di un altro
+         *     utente, scaduta o già chiusa risponde 404. Quella da cui arriva la richiesta risponde
+         *     409 con code current_session: per chiuderla si esce (logout).
+         */
+        delete: operations["closeMySession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/clients": {
         parameters: {
             query?: never;
@@ -204,6 +322,95 @@ export interface paths {
          * @description Permesso: clients.create
          */
         post: operations["createClient"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/clients/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importazione di clienti nuovi da un file CSV
+         * @description Permesso: clients.create. Per chi arriva da un altro programma. Il file è come quello
+         *     di importPriceListItems (UTF-8, al massimo 5 MB, separatore riconosciuto dalla prima
+         *     riga) e ha al massimo 5000 clienti; il file di exportClients si reimporta così com'è
+         *     (l'apostrofo davanti alle celle che sembrano formule si toglie). Colonne per nome,
+         *     in qualsiasi ordine: nome (ragione sociale, denominazione) è obbligatoria; le altre
+         *     sono tipo (impresa, azienda, privato, persona, ente pubblico, PA; vuoto vale
+         *     impresa), partita IVA, codice fiscale, email, PEC, telefono, codice destinatario
+         *     (codice SDI), indirizzo, CAP, città (comune), provincia, paese (vuoto vale IT), note.
+         *     Anche i nomi dei campi di ClientInput vanno bene. Ogni riga si controlla come
+         *     createClient, anche le partite IVA e i codici fiscali già presenti o ripetuti nel
+         *     file.
+         *
+         *     Si aggiungono solo clienti nuovi, tutti o nessuno: se anche una riga è sbagliata non
+         *     cambia niente e la risposta è 422 con gli errori sotto `file` o sotto `row.<n>` (n è
+         *     la riga del file, la prima è l'intestazione; al massimo 50 righe), ogni messaggio
+         *     preceduto dal nome della colonna.
+         */
+        post: operations["importClients"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/clients/balances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Crediti verso i clienti, cliente per cliente
+         * @description Permessi: clients.view e invoices.view. I clienti con fatture emesse ancora da
+         *     saldare, anche se archiviati, dal residuo più alto (a parità, per nome). Gli importi
+         *     sono quelli di SubjectAccount; outstanding e overdue in fondo sono le somme di tutti i
+         *     clienti, non solo della pagina.
+         */
+        get: operations["listClientBalances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/clients/balances/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei crediti verso i clienti in CSV
+         * @description Permessi e filtro come listClientBalances. Gli stessi clienti nello stesso ordine, senza
+         *     paginazione, nel formato dell'esportazione dei clienti: date come 30/11/2026, importi
+         *     con la virgola decimale (1234,50). Il file si chiama crediti-clienti.csv.
+         */
+        get: operations["exportClientBalances"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -323,6 +530,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/clients/{client}/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Estratto conto di un cliente
+         * @description Permessi: clients.view e invoices.view. Totali delle fatture emesse al del cliente, anche se
+         *     archiviato: fatturato, netto a incassare, già incassato, residuo e parte scaduta.
+         *     Le singole fatture si leggono con listInvoices e filter[client]=<id>. Senza
+         *     clients.view il cliente è «non trovato» (404), come nella scheda; senza invoices.view la
+         *     risposta è 403.
+         */
+        get: operations["getClientAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/clients/{client}/account/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * PDF dell'estratto conto di un cliente, da mandare come sollecito
+         * @description Permessi: clients.view e invoices.view, come getClientAccount. In A4: intestazione
+         *     dell'azienda, cliente con indirizzo e partita IVA, data di oggi, le fatture emesse non
+         *     ancora pagate dalla scadenza più vecchia (numero, data, scadenza, netto a pagare, già
+         *     incassato, residuo; «scaduta» accanto alla scadenza passata), totale da incassare e parte
+         *     scaduta, e l'IBAN dell'azienda se c'è. Sotto il numero di una fattura il cui cantiere
+         *     ha CIG o CUP esce la riga «CIG … - CUP …», come chiede la pubblica amministrazione per
+         *     abbinare il pagamento. Senza fatture aperte esce la riga «Nessuna fattura da
+         *     incassare.». Il file si chiama estratto-conto.pdf.
+         */
+        get: operations["getClientAccountPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/clients/{client}/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Cantieri di un cliente
+         * @description Permessi: clients.view e sites.view. Senza clients.view il cliente è «non trovato»
+         *     (404), come nella scheda; senza sites.view 403. Per la scheda del cliente: i cantieri
+         *     del cliente (anche archiviato) e quelli su cui gli è stata emessa una fattura, di
+         *     qualunque stato, prima quelli in corso, poi da iniziare, sospesi e chiusi, e a parità in
+         *     ordine di nome, come listSupplierSites. Con invoices.view, in invoiced l'imponibile
+         *     delle fatture emesse al cliente per il cantiere, in collected quanto incassato e in
+         *     to_collect quanto resta da incassare, con le stesse regole di revenue in
+         *     getSiteCostSummary ma solo per le fatture di quel cliente (zero se non ce ne sono);
+         *     senza invoices.view i tre campi sono null. Con quotes.view, in quoted l'imponibile del
+         *     preventivo da cui è nato il cantiere (createSiteFromQuote), con la regola di taxable del
+         *     preventivo; quoted è null per i cantieri non nati da un preventivo e senza quotes.view.
+         */
+        get: operations["listClientSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/clients/{client}/sites/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Cantieri di un cliente in CSV
+         * @description Permessi come listClientSites: clients.view (senza, 404) e sites.view (senza, 403).
+         *     Le stesse righe nello stesso ordine, nello stesso formato dell'esportazione dei clienti:
+         *     colonne Codice, Cantiere, Stato, poi Preventivo solo con quotes.view (vuota per i
+         *     cantieri non nati da un preventivo), poi Fatturato, Incassato e Da incassare solo con
+         *     invoices.view, importi con la virgola decimale (1234,50), e in fondo CIG e CUP del
+         *     cantiere (vuote se mancano). Il file si chiama cantieri-cliente.csv.
+         */
+        get: operations["exportClientSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/suppliers": {
         parameters: {
             query?: never;
@@ -344,6 +673,87 @@ export interface paths {
          * @description Permesso: suppliers.create
          */
         post: operations["createSupplier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importazione di fornitori nuovi da un file CSV
+         * @description Permesso: suppliers.create. Come importClients: stesso formato del file (al massimo
+         *     5000 fornitori), solo fornitori nuovi, tutti o nessuno, errori sotto `file` o
+         *     `row.<n>`; il file di exportSuppliers si reimporta così com'è. Colonne per nome:
+         *     nome (ragione sociale) è obbligatoria; le altre sono partita IVA, codice fiscale,
+         *     email, PEC, telefono, indirizzo, CAP, città, provincia, paese (vuoto vale IT),
+         *     categorie (separate da virgole: materiali, noli, subappalto, servizi, altro),
+         *     subappaltatore (sì o no, vuoto vale no), note. Ogni riga si controlla come
+         *     createSupplier.
+         */
+        post: operations["importSuppliers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/balances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Debiti verso i fornitori, fornitore per fornitore
+         * @description Permessi: suppliers.view e invoices.view. I fornitori con fatture ricevute ancora da
+         *     saldare, anche se archiviati, dal residuo più alto (a parità, per nome). Gli importi
+         *     sono quelli di SubjectAccount; outstanding e overdue in fondo sono le somme di tutti i
+         *     fornitori, non solo della pagina.
+         */
+        get: operations["listSupplierBalances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/balances/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei debiti verso i fornitori in CSV
+         * @description Permessi e filtro come listSupplierBalances. Gli stessi fornitori nello stesso ordine, senza
+         *     paginazione, nel formato dell'esportazione dei clienti: date come 30/11/2026, importi
+         *     con la virgola decimale (1234,50). Il file si chiama debiti-fornitori.csv.
+         */
+        get: operations["exportSupplierBalances"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -457,6 +867,127 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/suppliers/{supplier}/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Estratto conto di un fornitore
+         * @description Permessi: suppliers.view e invoices.view. Totali delle fatture ricevute dal del fornitore, anche se
+         *     archiviato: fatturato, netto a pagare, già pagato, residuo e parte scaduta.
+         *     Le singole fatture si leggono con listInvoices e filter[supplier]=<id>. Senza
+         *     suppliers.view il fornitore è «non trovato» (404), come nella scheda; senza invoices.view la
+         *     risposta è 403.
+         */
+        get: operations["getSupplierAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/{supplier}/account/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * PDF dell'estratto conto di un fornitore, da mandare per la verifica del saldo
+         * @description Permessi: suppliers.view e invoices.view, come getSupplierAccount. Come
+         *     getClientAccountPdf, con le fatture ricevute dal fornitore, anche archiviato: intestazione
+         *     dell'azienda, fornitore con indirizzo e partita IVA, data di oggi, le fatture ricevute non
+         *     ancora pagate dalla scadenza più vecchia (numero, data, scadenza, netto a pagare, già
+         *     pagato, residuo; «scaduta» accanto alla scadenza passata), totale da pagare e parte
+         *     scaduta, e la richiesta di segnalare eventuali differenze. Niente IBAN. Come nel PDF del
+         *     cliente, sotto il numero di una fattura il cui cantiere ha CIG o CUP esce la riga «CIG …
+         *     - CUP …». Senza fatture aperte esce la riga «Nessuna fattura da pagare.». Il file si
+         *     chiama estratto-conto.pdf.
+         */
+        get: operations["getSupplierAccountPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/{supplier}/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Cantieri di un fornitore
+         * @description Permessi: suppliers.view e sites.view. Senza suppliers.view il fornitore è «non trovato»
+         *     (404), come nella scheda; senza sites.view 403. Per la scheda del fornitore o del
+         *     subappaltatore, al contrario di listSiteSubcontractors: i cantieri su cui il fornitore,
+         *     anche archiviato, ha un costo o un ordine, di qualunque stato, prima quelli in corso, poi
+         *     da iniziare, sospesi e chiusi, e a parità in ordine di nome. Con costs.view, in costs
+         *     la somma dei costi inseriti a mano con quel fornitore sul cantiere (zero se ha solo
+         *     ordini), con la stessa regola di getSiteSupplierCosts; senza costs.view costs è null.
+         *     Con purchases.view, in orders la somma dei totali dei suoi ordini inviati o ricevuti sul
+         *     cantiere (le bozze no; zero se ha solo costi o bozze), con la stessa regola di total in
+         *     purchase_orders di getSiteCostSummary; senza purchases.view orders è null.
+         */
+        get: operations["listSupplierSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/suppliers/{supplier}/sites/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Cantieri di un fornitore in CSV
+         * @description Permessi come listSupplierSites: suppliers.view (senza, 404) e sites.view (senza, 403).
+         *     Le stesse righe nello stesso ordine, nello stesso formato dell'esportazione dei clienti:
+         *     colonne Codice, Cantiere, Stato, poi Costi solo con costs.view e Ordinato solo con
+         *     purchases.view, importi con la virgola decimale (1234,50), e in fondo CIG e CUP del
+         *     cantiere (vuote se mancano). Il file si chiama cantieri-fornitore.csv.
+         */
+        get: operations["exportSupplierSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/suppliers/{supplier}/documents": {
         parameters: {
             query?: never;
@@ -515,6 +1046,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/suppliers/{supplier}/documents/{document}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+                document: components["parameters"]["SupplierDocumentId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Il file di un documento di regolarità
+         * @description Permesso: suppliers.view. Senza permesso, o se il documento non ha un file, risponde
+         *     404. Il file arriva come allegato (Content-Disposition: attachment, con il nome
+         *     originale).
+         */
+        get: operations["getSupplierDocumentFile"];
+        /**
+         * Caricamento o sostituzione del file di un documento di regolarità
+         * @description Permesso: suppliers.update. Il corpo è il file, con il suo Content-Type: PDF, JPEG o
+         *     PNG (una scansione o una foto del documento), al massimo 20 MB. Il contenuto deve
+         *     corrispondere al tipo dichiarato (altrimenti 422 sotto file). Nome del file nella query.
+         *     Un file già presente viene sostituito. If-Match con la versione del documento: la
+         *     risposta è il documento con la versione nuova.
+         */
+        put: operations["setSupplierDocumentFile"];
+        post?: never;
+        /**
+         * Eliminazione del file di un documento di regolarità
+         * @description Permesso: suppliers.update. If-Match con la versione del documento. Il documento resta,
+         *     senza file; la risposta è il documento con la versione nuova. Se non c'è un file, 404.
+         */
+        delete: operations["deleteSupplierDocumentFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/deadlines": {
         parameters: {
             query?: never;
@@ -528,7 +1099,8 @@ export interface paths {
         /**
          * Elenco delle scadenze
          * @description Permesso: deadlines.view. Per il calendario si chiede un intervallo con filter[from] e
-         *     filter[to] (compresi) e per_page=100.
+         *     filter[to] (compresi) e per_page=100. search cerca nel titolo e nelle note, e nel CIG e
+         *     nel CUP del cantiere (anche in parte, in minuscolo o con gli spazi).
          */
         get: operations["listDeadlines"];
         put?: never;
@@ -557,9 +1129,41 @@ export interface paths {
          * Esportazione delle scadenze in CSV
          * @description Permesso: deadlines.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
          *     paginazione, nello stesso formato dell'esportazione dei clienti. Date come 30/11/2026,
-         *     importi con la virgola decimale (1234,50). Il file si chiama scadenze.csv.
+         *     importi con la virgola decimale (1234,50). Dopo «Note» le colonne CIG e CUP del
+         *     cantiere, vuote se mancano. L'ultima colonna, «Primo giorno lavorativo», è
+         *     `working_due_on`. Il file si chiama scadenze.csv.
          */
         get: operations["exportDeadlines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/deadlines/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Scadenze in formato calendario (iCalendar)
+         * @description Permesso: deadlines.view. Le scadenze come file .ics (RFC 5545) da aprire nel calendario
+         *     del telefono o del computer. Stessi filtri e ricerca dell'esportazione CSV; senza
+         *     `filter[status]` escono solo le scadenze aperte. Ogni scadenza è un evento di un giorno
+         *     intero, con un promemoria alle 9 del giorno prima; nella descrizione ci sono tipo,
+         *     importo, cliente, fornitore, cantiere, dipendente, mezzo e note. L'UID dell'evento resta
+         *     lo stesso a ogni esportazione, così il calendario aggiorna l'evento invece di
+         *     duplicarlo. Le ricorrenze non diventano RRULE: la scadenza successiva nasce quando si
+         *     completa quella attuale. Il file si chiama scadenze.ics.
+         */
+        get: operations["exportDeadlinesCalendar"];
         put?: never;
         post?: never;
         delete?: never;
@@ -689,7 +1293,7 @@ export interface paths {
         };
         /**
          * Elenco dei cantieri
-         * @description Permesso: sites.view. La ricerca guarda nome, codice, indirizzo e cliente.
+         * @description Permesso: sites.view. La ricerca guarda nome, codice, indirizzo, cliente, CIG e CUP.
          */
         get: operations["listSites"];
         put?: never;
@@ -718,6 +1322,12 @@ export interface paths {
          * Esportazione dei cantieri in CSV
          * @description Permesso: sites.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
          *     paginazione, nello stesso formato dell'esportazione dei clienti. Stato tradotto (Da iniziare, In corso, Sospeso, Chiuso), date come 30/11/2026, budget con la virgola decimale.
+         *     La colonna «Documenti squadra scaduti» vale Sì o No come team_documents_expired;
+         *     «Subappaltatori con documenti scaduti» vale Sì o No come subcontractors_expired
+         *     ed è vuota senza suppliers.view. Seguono CIG, CUP e, in fondo, titolo edilizio,
+         *     direttore dei lavori, coordinatore sicurezza e data della notifica preliminare
+         *     (permit, works_director, safety_coordinator, prior_notice_on). In fondo la colonna
+         *     «Ultimo rapportino» con la data di last_report_on, vuota se non ce ne sono.
          *     Il file si chiama cantieri.csv.
          */
         get: operations["exportSites"];
@@ -761,6 +1371,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/sites/{site}/sign/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * PDF del cartello di cantiere
+         * @description Permesso: sites.view. Senza permesso risponde 404, non 403. Il cartello di cantiere in A4
+         *     verticale, da ingrandire e appendere all'ingresso: lavori (nome del cantiere),
+         *     ubicazione, committente, titolo edilizio, CIG e CUP, impresa esecutrice (ragione
+         *     sociale, sede e partita IVA dell'azienda), direttore dei lavori, coordinatore per la
+         *     sicurezza in fase di esecuzione, data della notifica preliminare, inizio dei lavori e
+         *     fine prevista. Una voce non indicata esce con una riga vuota, da compilare a mano; CIG e
+         *     CUP escono solo se indicati. Con suppliers.view anche le imprese subappaltatrici (gli
+         *     stessi fornitori di listSiteSubcontractors, con partita IVA), senza importi. Il file
+         *     si chiama cartello-<codice del cantiere>.pdf (caratteri diversi da lettere, cifre e
+         *     trattino diventano un trattino), o cartello-cantiere.pdf se il cantiere non ha codice.
+         */
+        get: operations["getSiteSignPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/sites/{site}/team": {
         parameters: {
             query?: never;
@@ -776,7 +1419,10 @@ export interface paths {
          * Squadra del cantiere
          * @description Permesso: sites.view. Senza permesso risponde 404, non 403. Solo nome, cognome,
          *     mansione e stato dei dipendenti, senza costi: la vede anche chi non ha employees.view.
-         *     In ordine di cognome e nome.
+         *     In ordine di cognome e nome. Con le assenze di oggi, nel calendario italiano: `away`
+         *     per chi è assente tutto il giorno; tipo dell'assenza e ore di un permesso solo con
+         *     employees.view. `documents_expired` per chi ha un documento scaduto (idoneità,
+         *     attestato di un corso…), senza dire quale.
          */
         get: operations["getSiteTeam"];
         /**
@@ -785,6 +1431,103 @@ export interface paths {
          *     precedente (al massimo 200, i doppioni si tolgono). Senza If-Match: il valore è assoluto.
          */
         put: operations["replaceSiteTeam"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/team/documents/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Documenti della squadra del cantiere in CSV
+         * @description Permessi: sites.view ed employees.view. Senza sites.view risponde 404, non 403; senza
+         *     employees.view 403. Per il coordinatore della sicurezza: una riga per ogni documento dei
+         *     dipendenti della squadra (idoneità sanitaria, attestati dei corsi, patentini), in ordine
+         *     di cognome e nome, poi di tipo e di scadenza; chi non ha documenti ha una riga con lo
+         *     stato «Nessun documento». Colonne: Cognome, Nome, Mansione, Documento (il tipo per
+         *     esteso), Descrizione, Rilascio, Scadenza (come 30/11/2026), Stato, Note, File (Sì se c'è
+         *     la scansione). Lo stato, nell'ora italiana: Valido, In scadenza (entro 30 giorni),
+         *     Scaduto, Senza scadenza, oppure Rinnovato se dello stesso tipo c'è un documento con una
+         *     scadenza più lontana, che è quello che conta. Stesso formato dell'esportazione dei
+         *     clienti. Il file si chiama documenti-squadra.csv.
+         */
+        get: operations["exportSiteTeamDocuments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/subcontractors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Subappaltatori del cantiere
+         * @description Permessi: sites.view e suppliers.view. Senza sites.view risponde 404, non 403; senza
+         *     suppliers.view 403. Per la scheda del cantiere: i subappaltatori (fornitori con
+         *     `subcontractor`) che hanno sul cantiere un costo o un ordine, anche archiviati, in ordine
+         *     di nome, gli stessi del CSV dei loro documenti. Per ognuno la regolarità con le stesse
+         *     condizioni di filter[compliance] dei fornitori: `documents_expired`, `documents_expiring`
+         *     (entro 30 giorni, senza nulla di scaduto), `no_valid_durc` e `no_valid_credit_license`.
+         *     Nessun importo. Senza
+         *     paginazione: sono pochi per cantiere.
+         */
+        get: operations["listSiteSubcontractors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/subcontractors/documents/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Documenti dei subappaltatori del cantiere in CSV
+         * @description Permessi: sites.view e suppliers.view. Senza sites.view risponde 404, non 403; senza
+         *     suppliers.view 403. Per il coordinatore della sicurezza, come i documenti della squadra:
+         *     i subappaltatori (fornitori con `subcontractor`) che hanno sul cantiere un costo o un
+         *     ordine, anche archiviati, in ordine di nome; una riga per ogni loro documento (DURC,
+         *     visura camerale, assicurazione), poi di tipo e di scadenza; chi non ha documenti ha una
+         *     riga con lo stato «Nessun documento». Colonne: Subappaltatore, Partita IVA, Documento (il
+         *     tipo per esteso), Descrizione, Rilascio, Scadenza (come 30/11/2026), Stato, Note, File
+         *     (Sì se c'è la scansione). Stati come nei documenti della squadra: Valido, In scadenza
+         *     (entro 30 giorni), Scaduto, Senza scadenza, Rinnovato. Nessun importo. Il file si chiama
+         *     documenti-subappaltatori.csv.
+         */
+        get: operations["exportSiteSubcontractorDocuments"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -813,6 +1556,9 @@ export interface paths {
          * Nuovo rapportino
          * @description Permesso: reports.create. Nasce in bozza. Uno solo per cantiere e giorno (altrimenti
          *     422 su date). Dipendenti e mezzi sono quelli dell'azienda, anche fuori dalla squadra.
+         *     Niente ore a un dipendente assente tutto il giorno (un'assenza senza ore che comprende
+         *     la data): 422 sotto `labor.N.employee_id`, senza dire il tipo dell'assenza. Un permesso
+         *     a ore non blocca.
          */
         post: operations["createDailyReport"];
         delete?: never;
@@ -837,8 +1583,148 @@ export interface paths {
          *     una proposta da inviare a createDailyReport, con la squadra del cantiere a 8 ore.
          *     Senza date vale oggi, nel calendario italiano. Con i dipendenti e i mezzi attivi da
          *     scegliere (solo nomi, niente costi), anche per chi non ha employees.view o vehicles.view.
+         *     Con `copy_previous=true` la proposta prende persone, mezzi, ore e descrizioni delle
+         *     righe dall'ultimo rapportino del cantiere prima di quel giorno («come ieri»), lasciando
+         *     fuori dipendenti e mezzi non più attivi; meteo, lavori svolti e note restano vuoti.
+         *     Senza un rapportino precedente la proposta è quella della squadra. Chi è assente tutto
+         *     il giorno (ferie, malattia…, un'assenza senza ore) resta fuori dalla proposta e tra i
+         *     dipendenti da scegliere ha `away`; il tipo dell'assenza e le ore di un permesso solo
+         *     con employees.view. Tra i dipendenti e i mezzi da scegliere `documents_expired` dice
+         *     chi ha un documento scaduto in quel giorno (idoneità, corso, assicurazione, bollo…),
+         *     senza dire quale: è un avviso, le ore si possono segnare lo stesso.
          */
         get: operations["getTodayDailyReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/daily-reports/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei rapportini in CSV
+         * @description Permesso: reports.view. Stessi filtri e ordinamento dell'elenco, senza paginazione, nello
+         *     stesso formato dell'esportazione dei clienti. Date come 30/11/2026, importi con la
+         *     virgola decimale (1234,50). In fondo le colonne «Ore straordinario»
+         *     (total_overtime_hours), «Ore perse per maltempo» (total_weather_hours), «Dipendenti in
+         *     trasferta» (travel_count) e «Festivo» (holiday, Sì o No). Il file si chiama
+         *     rapportini.csv.
+         */
+        get: operations["exportDailyReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/daily-reports/monthly-hours": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Foglio ore mensile dei dipendenti in CSV
+         * @description Permessi: reports.view ed employees.view. Le ore dei rapportini di un mese, da mandare al
+         *     consulente del lavoro per le buste paga: una riga per dipendente con ore nel mese (per
+         *     cognome e nome), con cognome, nome e codice fiscale, una colonna per ogni giorno del
+         *     mese (1, 2, … 31; vuota se zero) e il totale. Ore con la virgola decimale (7,5). Se un
+         *     dipendente lavora su due cantieri lo stesso giorno, le ore si sommano. Si possono tenere
+         *     solo i rapportini di un cantiere o di uno stato (per esempio solo gli approvati). Senza
+         *     filter[site] ci sono anche le assenze (listEmployeeAbsences), qualunque sia
+         *     filter[status]: nei giorni di assenza la cella porta la sigla, dopo le ore se ci sono
+         *     (FE ferie, MA malattia, PE permesso, IN infortunio, AL altro; con le ore del permesso,
+         *     come «6 PE 2»), e compare anche chi nel mese ha solo assenze, con totale 0. Dopo il
+         *     totale, la colonna «Di cui straordinario» con la somma di overtime_hours del mese (0 se
+         *     non ce ne sono), poi «Giorni di trasferta»: i giorni del mese con almeno una riga con
+         *     travel (un giorno su due cantieri conta una volta), poi «Di cui festive»: le ore lavorate
+         *     di domenica, nei festivi nazionali (Pasquetta compresa) e nel santo patrono dei dati
+         *     dell'azienda (0 se non ce ne sono), poi «Ore perse per maltempo»: la somma di
+         *     weather_hours del mese (0 se non ce ne sono), per la cassa integrazione per intemperie.
+         *     Il file si chiama ore-2026-11.csv.
+         */
+        get: operations["exportMonthlyHours"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/daily-reports/monthly-site-hours": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ore mensili dei dipendenti per cantiere in CSV
+         * @description Permessi: reports.view ed employees.view. Le ore dei rapportini di un mese divise per
+         *     cantiere, come le chiedono la Cassa Edile e il consulente del lavoro: una riga per
+         *     dipendente e cantiere con ore nel mese (per cognome, nome e nome del cantiere), con
+         *     cognome, nome, codice fiscale, cantiere, codice e indirizzo del cantiere, giorni con
+         *     ore e ore (con la virgola decimale, 7,5), poi «Di cui straordinario» (somma di
+         *     overtime_hours, 0 se non ce ne sono), «Giorni di trasferta» (giorni con travel su quel
+         *     cantiere) e «Di cui festive» (ore di domenica, dei festivi nazionali e del santo patrono
+         *     dei dati dell'azienda), poi «Ore perse per maltempo» (somma di weather_hours su quel
+         *     cantiere). Si possono tenere solo i rapportini di un
+         *     cantiere o di uno stato (per esempio solo gli approvati). Il file si chiama
+         *     ore-cantieri-2026-11.csv.
+         */
+        get: operations["exportMonthlySiteHours"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/daily-reports/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Giornale dei lavori di un cantiere in PDF
+         * @description Permesso: reports.view. I rapportini di un cantiere in un periodo, per data, in un solo
+         *     PDF da archiviare o consegnare alla direzione lavori: ognuno comincia su una pagina
+         *     nuova, come in getDailyReportPdf (anche con «festivo» nel titolo, con il CIG e il CUP,
+         *     il titolo edilizio, il direttore dei lavori e il coordinatore sicurezza del cantiere). Cantiere, inizio e fine sono obbligatori; si possono
+         *     tenere solo i rapportini di uno stato (per esempio solo gli approvati). Al massimo 200
+         *     rapportini: oltre, 422 sotto filter[to] e si accorcia il periodo. Senza rapportini nel
+         *     periodo, 422 sotto filter[from]. Un cantiere che non c'è o di un'altra azienda risponde
+         *     404. Il file si chiama giornale-lavori-C-1-2026-11-01-2026-11-30.pdf (codice del
+         *     cantiere, se c'è, e periodo).
+         */
+        get: operations["getWorkLogPdf"];
         put?: never;
         post?: never;
         delete?: never;
@@ -866,7 +1752,9 @@ export interface paths {
         /**
          * Modifica di un rapportino in bozza
          * @description Permesso: reports.update. Si inviano tutti i campi; le righe delle ore sostituiscono le
-         *     precedenti. Solo in bozza: altrimenti 409 con code report_not_draft.
+         *     precedenti. Solo in bozza: altrimenti 409 con code report_not_draft. Come in
+         *     createDailyReport, 422 sotto `labor.N.employee_id` per un dipendente assente tutto il
+         *     giorno.
          */
         put: operations["updateDailyReport"];
         post?: never;
@@ -875,6 +1763,41 @@ export interface paths {
          * @description Permesso: reports.delete. Solo in bozza: altrimenti 409 con code report_not_draft.
          */
         delete: operations["deleteDailyReport"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/daily-reports/{report}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                report: components["parameters"]["DailyReportId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * PDF del rapportino da stampare e firmare
+         * @description Permesso: reports.view. Il rapportino in A4, da archiviare o da far firmare al
+         *     committente o al direttore dei lavori: intestazione dell'azienda, cantiere (con la riga
+         *     «CIG … - CUP …» sotto l'indirizzo, solo se il cantiere ne ha almeno uno, e poi le righe
+         *     «Titolo edilizio: …», «Direttore dei lavori: …» e «Coordinatore sicurezza: …», solo se
+         *     indicati nel cantiere), data, meteo,
+         *     lavori eseguiti, ore dei dipendenti e dei mezzi con i totali, note e spazi per le firme.
+         *     Lo straordinario compare accanto al dipendente («straordinario 2») e sotto il totale
+         *     delle ore («di cui straordinario»), solo se c'è. Di domenica, nei festivi nazionali
+         *     (Pasquetta compresa) e nel santo patrono dei dati dell'azienda il titolo dice «festivo»
+         *     («Rapportino del 06/12/2026, festivo»), come `holiday` del rapportino. Niente costi. Una bozza esce con la dicitura «bozza»; un rapportino approvato riporta
+         *     chi l'ha approvato e quando. Il file si chiama rapportino-2026-11-05-C-1.pdf (data e
+         *     codice del cantiere, se c'è). Senza permesso risponde 404, non 403.
+         */
+        get: operations["getDailyReportPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -929,6 +1852,99 @@ export interface paths {
          * @description Permesso: costs.create.
          */
         post: operations["createSiteCost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/site-costs/totals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Costi di tutti i cantieri confrontati con il budget
+         * @description Permessi: costs.view e sites.view (senza uno dei due, 403). Un elemento per cantiere,
+         *     anche senza costi (a zero). Il totale segue la regola di getSiteCostSummary: manodopera
+         *     e mezzi dai rapportini approvati al costo orario fissato all'approvazione, più i costi
+         *     inseriti a mano;
+         *     il materiale del magazzino e gli ordini ai fornitori restano fuori. Importi senza IVA.
+         *     budget_remaining è il budget meno il totale, null senza budget; nell'ordinamento per
+         *     residuo i cantieri senza budget vanno in fondo in entrambe le direzioni.
+         *     filter[over_budget]=true lascia i cantieri con un budget superato, false gli altri
+         *     (quelli senza budget compresi). total_amount e budget_amount sommano tutti i cantieri
+         *     che rispettano i filtri, non solo la pagina. search cerca nel nome e nel codice del
+         *     cantiere, e nel CIG e nel CUP (anche in parte, in minuscolo o con gli spazi). Con
+         *     filter[from] e/o filter[to] (date del rapportino o del costo, estremi
+         *     compresi) period_total dà la parte del totale che cade nel periodo e
+         *     period_total_amount la somma sui cantieri filtrati; senza periodo valgono null.
+         *     Budget, residuo e over_budget restano sul totale di sempre; sort=period_total ordina per
+         *     costo del periodo (senza periodo coincide con sort=total). 422 se una data non è valida
+         *     o la fine viene prima dell'inizio.
+         */
+        get: operations["listSiteCostTotals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/site-costs/totals/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei costi di tutti i cantieri in CSV
+         * @description Permessi: costs.view e sites.view. Stessi filtri, ricerca e ordinamento dell'elenco,
+         *     senza paginazione, nello stesso formato dell'esportazione dei clienti. Importi con la
+         *     virgola decimale (1234,50); budget e residuo vuoti senza budget; «Sopra budget» vale Sì
+         *     o No. Dopo «Sopra budget» le colonne CIG e CUP del cantiere, vuote se mancano. Con
+         *     filter[from] o filter[to] c'è in fondo la colonna «Costo del periodo». Il file si
+         *     chiama costi-cantieri.csv.
+         */
+        get: operations["exportSiteCostTotals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/costs/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei costi in CSV
+         * @description Permesso: costs.view. Stessi filtri e ordinamento dell'elenco, senza paginazione, nello
+         *     stesso formato dell'esportazione dei clienti. Date come 30/11/2026, importi con la
+         *     virgola decimale (1234,50). In fondo le colonne CIG e CUP del cantiere, vuote se
+         *     mancano. Il file si chiama costi.csv.
+         */
+        get: operations["exportSiteCosts"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -996,6 +2012,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/purchase-orders/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione degli ordini ai fornitori in CSV
+         * @description Permesso: purchases.view. Stessi filtri e ordinamento dell'elenco, senza paginazione, nello
+         *     stesso formato dell'esportazione dei clienti. Date come 30/11/2026, importi con la
+         *     virgola decimale (1234,50). In fondo la colonna Fatturato (invoiced_amount), vuota
+         *     senza invoices.view, poi CIG e CUP del cantiere (vuote se il cantiere non li ha). Il
+         *     file si chiama ordini.csv.
+         */
+        get: operations["exportPurchaseOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/purchase-orders/{order}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * PDF dell'ordine al fornitore
+         * @description Permesso: purchases.view. L'ordine in A4, da mandare al fornitore: intestazione
+         *     dell'azienda, fornitore con indirizzo e partita IVA, cantiere di consegna e data di
+         *     consegna se ci sono, righe con unità, quantità, prezzo e importo, totale senza IVA e
+         *     note. Una bozza esce con la dicitura «bozza». Il file si chiama ordine-2026-001.pdf.
+         *     Senza permesso risponde 404, non 403.
+         */
+        get: operations["getPurchaseOrderPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/purchase-orders/{order}/lines/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione delle righe di un ordine al fornitore in CSV
+         * @description Permesso: purchases.view. Senza permesso risponde 404. Tutte le righe, nell'ordine
+         *     dell'ordine, in qualunque stato, nello stesso formato delle altre esportazioni, per
+         *     confrontarle con le offerte o con la fattura del fornitore. Colonne: Descrizione, Unità,
+         *     Quantità, Prezzo e Importo; numeri con la virgola decimale (1234,50). In fondo una riga
+         *     Totale con il solo importo, uguale al totale dell'ordine (senza IVA). Il file si chiama
+         *     come il PDF: ordine-<numero>.csv (la barra del numero diventa un trattino).
+         */
+        get: operations["exportPurchaseOrderLines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/purchase-orders/{order}": {
         parameters: {
             query?: never;
@@ -1024,6 +2124,34 @@ export interface paths {
          * @description Permesso: purchases.delete. Solo in bozza: altrimenti 409 con code order_not_draft.
          */
         delete: operations["deletePurchaseOrder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/purchase-orders/{order}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copia di un ordine al fornitore, per riordinare
+         * @description Permessi: purchases.view e purchases.create. Crea un ordine nuovo in bozza allo stesso
+         *     fornitore, per lo stesso cantiere, con le stesse note e una copia di tutte le righe, in
+         *     qualunque stato sia quello di partenza, che non cambia. La data è quella di oggi (ora
+         *     italiana), con il numero successivo del suo anno; la data di consegna resta vuota.
+         *     Senza permesso di vedere gli ordini risponde 404.
+         */
+        post: operations["duplicatePurchaseOrder"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1098,6 +2226,7 @@ export interface paths {
          * Articoli di magazzino con la giacenza
          * @description Permesso: warehouse.view. La ricerca guarda codice e nome. La giacenza è la somma dei
          *     carichi meno quella degli scarichi, e può essere negativa se manca un carico.
+         *     filter[below_min]=true dà solo gli articoli sotto la scorta minima, da riordinare.
          */
         get: operations["listWarehouseItems"];
         put?: never;
@@ -1106,6 +2235,64 @@ export interface paths {
          * @description Permesso: warehouse.create. Il codice, se c'è, è unico nell'azienda (422 su code).
          */
         post: operations["createWarehouseItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/warehouse/items/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importazione di articoli nuovi di magazzino da un file CSV, con la giacenza iniziale
+         * @description Permesso: warehouse.create. Come importClients: stesso formato del file (al massimo
+         *     5000 articoli), solo articoli nuovi, tutti o nessuno, errori sotto `file` o
+         *     `row.<n>`; il file di exportWarehouseItems si reimporta così com'è, se nessuna
+         *     giacenza è negativa. Colonne per nome:
+         *     articolo (nome) e unità sono obbligatorie; le altre sono codice, giacenza (12,500
+         *     oppure 12.5, non negativa, al massimo tre decimali) e note. Ogni riga si controlla
+         *     come createWarehouseItem; un codice già presente nell'azienda o ripetuto nel file
+         *     (senza distinguere maiuscole) è un errore della riga. Una giacenza maggiore di zero
+         *     diventa un carico con la data di oggi e la nota «Giacenza iniziale (importazione)».
+         */
+        post: operations["importWarehouseItems"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/warehouse/items/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione degli articoli di magazzino con la giacenza in CSV
+         * @description Permesso: warehouse.view. Stessa ricerca e ordinamento dell'elenco, senza paginazione,
+         *     nello stesso formato dell'esportazione dei clienti. Giacenza con la virgola decimale
+         *     (12,500). Il file si chiama magazzino.csv, o magazzino-al-2026-12-31.csv con as_of. Le
+         *     colonne restano quelle dell'importazione, più costo medio e valore in fondo (che
+         *     l'importazione ignora): la scorta minima non c'è.
+         */
+        get: operations["exportWarehouseItems"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1163,9 +2350,38 @@ export interface paths {
         /**
          * Carico o scarico di un articolo
          * @description Permesso: warehouse.create. Un movimento non si modifica: si elimina e se ne registra un
-         *     altro. Lo scarico verso un cantiere indica site_id.
+         *     altro. Lo scarico verso un cantiere indica site_id; il materiale che torna dal cantiere
+         *     è un carico con site_id e site_return true.
          */
         post: operations["createWarehouseMovement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/warehouse/movements/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione dei movimenti di magazzino in CSV
+         * @description Permesso: warehouse.view. Stessi filtri e stesso ordine dell'elenco (dal più recente),
+         *     senza paginazione, nello stesso formato delle altre esportazioni: ad esempio con
+         *     filter[site]=<id> e filter[kind]=out, il materiale scaricato su un cantiere. Colonne:
+         *     Data (all'italiana), Tipo (Carico, Scarico o Reso dal cantiere), Codice, Articolo, Unità, Quantità con la
+         *     virgola decimale (12,500), Cantiere (codice e nome), Ordine (numero dell'ordine da cui
+         *     viene il carico), Note, Costo unitario (dei carichi) e Valore (come value). Il file si chiama movimenti-magazzino.csv.
+         */
+        get: operations["exportWarehouseMovements"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1196,6 +2412,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/warehouse/stock-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rettifica d'inventario dalla conta fisica
+         * @description Permesso: warehouse.create. Per ogni articolo indicato si manda la quantità contata a
+         *     una data (anche zero); il backend confronta la conta con la giacenza a quel giorno
+         *     (tutti i movimenti fino a quella data compresa) e registra la differenza: un carico se
+         *     si è contato di più, uno scarico se di meno, nessun movimento se coincide. I movimenti
+         *     hanno la data della conta, nessun cantiere, nessun costo (il costo medio non cambia) e
+         *     come note quelle indicate o «Rettifica d'inventario». I movimenti dopo quella data
+         *     restano e continuano a contare. Un articolo una volta sola (422 su lines.N.item_id);
+         *     un articolo sconosciuto o di un'altra azienda dà 422 su lines.N.item_id e non scrive
+         *     niente. Le righe della risposta sono nello stesso ordine della richiesta.
+         */
+        post: operations["countWarehouseStock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/warehouse/stock-counts/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rettifica d'inventario da un foglio di conta in CSV
+         * @description Permesso: warehouse.create. Come countWarehouseStock, ma le quantità contate vengono da
+         *     un file CSV nello stesso formato delle altre importazioni (al massimo 5000 righe):
+         *     di solito magazzino.csv (exportWarehouseItems, anche con as_of) con una colonna
+         *     «Contata» aggiunta e compilata. Colonne per nome: contata (12,500 oppure 12.5, non
+         *     negativa, al massimo tre decimali) e codice o articolo. L'articolo si trova per codice
+         *     (senza distinguere maiuscole); se il codice è vuoto, per nome, purché un solo articolo
+         *     lo abbia. Le righe con la cella contata vuota non si contano e restano come sono. Tutto
+         *     o niente: errori sotto `date`, `file` o `row.<n>` (articolo sconosciuto o contato due
+         *     volte, quantità non valida) e nessun movimento scritto. Le note dei movimenti sono
+         *     «Rettifica d'inventario (importazione)». La risposta è quella di countWarehouseStock,
+         *     nell'ordine delle righe del file.
+         */
+        post: operations["importWarehouseStockCount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/sites/{site}/cost-summary": {
         parameters: {
             query?: never;
@@ -1210,11 +2490,273 @@ export interface paths {
         /**
          * Riepilogo dei costi di un cantiere, confrontato con il budget
          * @description Permesso: costs.view. Senza permesso risponde 404, non 403. Manodopera e mezzi vengono
-         *     dai rapportini approvati, alle ore per il costo orario attuale di dipendenti e mezzi
-         *     (senza costo orario valgono zero e si contano in missing_hourly_costs); poi i costi
-         *     inseriti a mano per categoria. Importi senza IVA.
+         *     dai rapportini approvati, alle ore per il costo orario di dipendenti e mezzi fissato
+         *     all'approvazione del rapportino (quello attuale se allora mancava; senza costo orario
+         *     valgono zero e si contano in missing_hourly_costs); poi i costi
+         *     inseriti a mano per categoria. Importi senza IVA. Con invoices.view anche revenue: il
+         *     fatturato del cantiere (imponibile delle fatture emesse collegate) e il margine
+         *     rispetto ai costi; senza quel permesso revenue è null. Con anche estimates.view, in
+         *     revenue ci sono i SAL approvati dei computi del cantiere (certified) e quelli ancora
+         *     senza fattura (certified_uninvoiced), con la ritenuta di garanzia trattenuta
+         *     (retention_held) e quella ancora da svincolare (retention_to_release); lo svincolo già
+         *     fatturato (retention_released) c'è anche senza estimates.view. Con warehouse.view
+         *     anche warehouse_materials: il materiale scaricato dal magazzino sul cantiere, meno quello
+         *     tornato in magazzino (site_return), valutato al costo medio dei carichi fino al giorno di
+         *     ogni movimento; è un'informazione a parte e
+         *     non entra nel totale né nel margine (il materiale può essere già tra i costi inseriti
+         *     a mano). Senza quel permesso warehouse_materials è null.
+         *     Con purchases.view anche purchase_orders: gli ordini ai fornitori del cantiere già
+         *     inviati o ricevuti (le bozze no), con il loro totale (il costo impegnato) e, con
+         *     invoices.view, l'imponibile delle fatture ricevute collegate; anche questo non entra nel
+         *     totale. Senza purchases.view purchase_orders è null.
          */
         get: operations["getSiteCostSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/cost-summary/months": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Costi di un cantiere mese per mese, per il grafico della panoramica
+         * @description Permesso: costs.view. Senza permesso risponde 404, non 403, come getSiteCostSummary. Stessa
+         *     regola del riepilogo: manodopera e mezzi dai rapportini approvati al costo orario
+         *     fissato all'approvazione, più i costi inseriti a mano, divisi per mese della data del rapportino o del
+         *     costo. Un mese per riga, dal primo all'ultimo mese
+         *     con un costo, compresi quelli in mezzo senza costi (a zero); nessuna riga se il
+         *     cantiere non ha costi. cumulative è il totale dall'inizio fino a quel mese compreso,
+         *     da confrontare con budget; l'ultimo cumulative è uguale al total di getSiteCostSummary.
+         *     Con invoices.view anche invoiced, l'imponibile delle fatture emesse collegate al
+         *     cantiere per mese della data della fattura, e il suo progressivo cumulative_invoiced
+         *     (l'ultimo è il fatturato di revenue in getSiteCostSummary); i mesi vanno allora dal primo
+         *     all'ultimo con un costo o una fattura. Senza quel permesso i due campi sono null e le
+         *     fatture non allungano l'elenco. Importi senza IVA.
+         */
+        get: operations["getSiteMonthlyCosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/cost-summary/months/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Costi di un cantiere mese per mese in CSV
+         * @description Permesso: costs.view (senza, 404 come getSiteMonthlyCosts). Le stesse righe di
+         *     getSiteMonthlyCosts, nello stesso formato dell'esportazione dei clienti: colonne Mese
+         *     (11/2026), Manodopera, Mezzi, Costi inseriti, Totale, Progressivo, importi con la virgola
+         *     decimale (1234,50); con invoices.view in fondo anche Fatturato e Fatturato progressivo.
+         *     Il file si chiama costi-mensili-cantiere.csv.
+         */
+        get: operations["exportSiteMonthlyCosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/cost-summary/suppliers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Costi inseriti a mano di un cantiere divisi per fornitore
+         * @description Permesso: costs.view. Senza permesso risponde 404, non 403, come getSiteCostSummary. I
+         *     costi inseriti a mano del cantiere raggruppati per fornitore, divisi per categoria, con
+         *     quanti sono; i costi senza fornitore stanno in una riga con supplier null. Ordine dal
+         *     totale più alto, a pari merito per nome del fornitore (la riga senza fornitore per
+         *     ultima). total è la somma di tutte le righe ed è uguale a materials + rentals +
+         *     subcontract + other di getSiteCostSummary. Manodopera e mezzi dei rapportini non hanno
+         *     fornitore e restano fuori. Importi senza IVA; nessuna riga se il cantiere non ha costi
+         *     inseriti. Con filter[from] e/o filter[to] contano solo i costi con la data dentro il
+         *     periodo (estremi compresi); 422 se una data non è valida o la fine viene prima
+         *     dell'inizio.
+         */
+        get: operations["getSiteSupplierCosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/cost-summary/suppliers/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Costi di un cantiere per fornitore in CSV
+         * @description Permesso: costs.view (senza, 404 come getSiteSupplierCosts). Le stesse righe nello stesso
+         *     ordine di getSiteSupplierCosts, con lo stesso periodo, nello stesso formato dell'esportazione dei clienti:
+         *     colonne Fornitore, Costi, Materiali, Noli, Subappalti, Altro, Totale, importi con la
+         *     virgola decimale (1234,50); la riga senza fornitore ha «Senza fornitore». Il file si
+         *     chiama costi-fornitori-cantiere.csv.
+         */
+        get: operations["exportSiteSupplierCosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/work-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ore di un cantiere per dipendente e per mezzo
+         * @description Permessi: sites.view (senza, 404 come per la scheda) e reports.view (senza, 403). Per
+         *     la scheda squadra del cantiere: ore dai rapportini, giorni con ore, primo e ultimo
+         *     giorno per dipendente e per mezzo, da chi ha più ore. I costi, alle ore per il costo
+         *     orario fissato all'approvazione (attuale per i rapportini non approvati), ci sono solo con costs.view; senza quel permesso, o senza costo orario,
+         *     sono null. Senza filtri conta tutti i rapportini del cantiere.
+         *     Per ogni dipendente anche le ore di straordinario (comprese nelle ore), i giorni di
+         *     trasferta e le ore perse per maltempo sul cantiere (weather_hours, anche dalle giornate
+         *     perse tutte), con il totale delle ore perse in labor.weather_hours, per la richiesta
+         *     di cassa integrazione per intemperie. Chi nel periodo ha solo ore perse compare con
+         *     ore, giorni e costo a zero, e primo e ultimo giorno sono quelli delle ore perse.
+         */
+        get: operations["getSiteWorkSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/work-summary/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ore di un cantiere per dipendente e per mezzo in CSV
+         * @description Permessi come getSiteWorkSummary: sites.view (senza, 404) e reports.view (senza, 403).
+         *     Le stesse righe nello stesso ordine e con gli stessi filtri: prima i dipendenti, poi
+         *     una riga «Totale dipendenti», poi i mezzi e una riga «Totale mezzi». Colonne Tipo
+         *     (Dipendente o Mezzo), Nome (cognome e nome del dipendente, nome del mezzo), Targa, Ore,
+         *     Giorni, poi Costo solo con costs.view (vuoto senza costo orario), poi Primo giorno e
+         *     Ultimo giorno, e in fondo Ore perse per maltempo, Di cui straordinario, Giorni di
+         *     trasferta e Di cui festive (vuote per i mezzi; nella riga «Totale dipendenti» i totali di
+         *     labor). Ore e
+         *     importi con la virgola decimale (12,50), date come 30/11/2026. Il file si chiama
+         *     ore-cantiere.csv.
+         */
+        get: operations["exportSiteWorkSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/warehouse-materials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Materiale del magazzino di un cantiere, articolo per articolo
+         * @description Permessi: sites.view (senza, 404 come per la scheda) e warehouse.view (senza, 403). Per
+         *     ogni articolo scaricato sul cantiere o tornato dal cantiere (site_return): quantità
+         *     scaricata, tornata e netta, e il valore netto come in warehouse_materials del riepilogo
+         *     dei costi, che è la somma di amount. In ordine di nome dell'articolo, senza paginazione.
+         */
+        get: operations["listSiteWarehouseMaterials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/sites/{site}/warehouse-materials/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Materiale del magazzino di un cantiere in CSV
+         * @description Permessi: sites.view (senza, 404) e warehouse.view (senza, 403), come
+         *     listSiteWarehouseMaterials, con le stesse righe nello stesso ordine e lo stesso formato
+         *     delle altre esportazioni. Colonne: Codice, Articolo, Unità, Scaricata, Tornata, Netta
+         *     (quantità con la virgola decimale), Valore (1234,50, anche negativo) e Movimenti senza
+         *     costo; in fondo una riga Totale con il solo valore, uguale ad amount. Il file si chiama
+         *     materiale-cantiere.csv.
+         */
+        get: operations["exportSiteWarehouseMaterials"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1237,7 +2779,10 @@ export interface paths {
         /**
          * Documenti e foto di un cantiere
          * @description Permesso: documents.view. Senza permesso, o se il cantiere non c'è, risponde 404. Dal più
-         *     recente. Le foto sono i file JPEG, PNG e WebP; gli altri sono documenti.
+         *     recente. Le foto sono i file JPEG, PNG e WebP; gli altri sono documenti. Con filter[q]
+         *     solo i documenti con il testo nel titolo, nel nome del file o nelle note, senza
+         *     distinguere maiuscole e minuscole e senza caratteri jolly; un testo di soli spazi è
+         *     ignorato.
          */
         get: operations["listSiteDocuments"];
         put?: never;
@@ -1245,9 +2790,13 @@ export interface paths {
          * Caricamento di un documento o di una foto
          * @description Permesso: documents.create. Il corpo è il file, con il suo Content-Type: PDF, JPEG, PNG,
          *     WebP, Word (.docx) o Excel (.xlsx), al massimo 20 MB. Il contenuto deve corrispondere al
-         *     tipo dichiarato (altrimenti 422 sotto file). Nome del file e titolo nella query; senza
+         *     tipo dichiarato (altrimenti 422 sotto file). Le foto perdono posizione GPS e altri
+         *     metadati (vedi le regole comuni). Nome del file e titolo nella query; senza
          *     titolo vale il nome del file. Il file non si sostituisce: si elimina e se ne carica un
-         *     altro.
+         *     altro. Con daily_report_id il file (di solito una foto scattata in cantiere) resta
+         *     collegato a un rapportino dello stesso cantiere; se il rapportino non c'è o è di un altro
+         *     cantiere, 422 sotto daily_report_id. Il collegamento non si cambia dopo il caricamento;
+         *     se il rapportino viene eliminato, il file resta nel cantiere senza collegamento.
          */
         post: operations["uploadSiteDocument"];
         delete?: never;
@@ -1316,6 +2865,121 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/cash-flow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Previsione di cassa, mese per mese
+         * @description Permesso: invoices.view. Quanto resta da incassare dalle fatture emesse e da pagare
+         *     per quelle ricevute (remaining_amount, come in DashboardInvoices), diviso per mese
+         *     della scadenza di pagamento, a partire dal mese in corso in Italia. Le fatture già
+         *     scadute stanno in overdue e non nel loro mese; quelle senza scadenza in undated;
+         *     quelle oltre l'ultimo mese in later. balance di ogni mese è il saldo accumulato:
+         *     overdue più i netti dei mesi fino a quello compreso. Conta solo le fatture: preventivi,
+         *     ordini e SAL non ancora fatturati restano fuori.
+         */
+        get: operations["getCashFlowForecast"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/cash-flow/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Previsione di cassa in CSV
+         * @description Permesso e parametro come getCashFlowForecast, nel formato delle altre esportazioni:
+         *     importi con la virgola decimale (1234,50), negativi con il meno. Una riga per lo
+         *     scaduto (Scaduto al 07/11/2026), una per mese (11/2026), poi Oltre, Senza scadenza e
+         *     Totale; il saldo progressivo c'è solo nelle righe dello scaduto e dei mesi. Il file si
+         *     chiama previsione-cassa.csv.
+         */
+        get: operations["exportCashFlowForecast"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vat-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Riepilogo IVA per la liquidazione, mese per mese o trimestre per trimestre
+         * @description Permesso: invoices.view. Imponibile e IVA delle fatture del registro di un anno, divise
+         *     per mese o trimestre della data della fattura (non della registrazione né del
+         *     pagamento: pagate e non pagate contano allo stesso modo), per preparare la
+         *     liquidazione con il commercialista. sales sono le fatture emesse, purchases le
+         *     ricevute. sales_split_payment_vat è la parte di sales_vat delle fatture in scissione
+         *     dei pagamenti, che versa la pubblica amministrazione. reverse_charge_taxable è
+         *     l'imponibile delle fatture ricevute con natura IVA N6.x (inversione contabile):
+         *     l'IVA da integrare non è nel registro e va calcolata a parte. balance è sales_vat
+         *     meno sales_split_payment_vat meno purchases_vat: positivo è IVA a debito, negativo a
+         *     credito. Niente IVA per cassa, pro rata né acconto di dicembre.
+         */
+        get: operations["getVatSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vat-summary/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Riepilogo IVA in CSV
+         * @description Permesso e parametri come getVatSummary, nel formato delle altre esportazioni: importi
+         *     con la virgola decimale (1234,50), negativi con il meno. Una riga per periodo
+         *     (01/2026 o 1° trimestre 2026) e la riga Totale; colonne Periodo, Imponibile vendite,
+         *     IVA vendite, di cui IVA in scissione, Imponibile acquisti, IVA acquisti, Imponibile
+         *     acquisti in inversione contabile, Saldo IVA. Il file si chiama riepilogo-iva-2026.csv.
+         */
+        get: operations["exportVatSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/dashboard": {
         parameters: {
             query?: never;
@@ -1330,14 +2994,65 @@ export interface paths {
          * Indicatori della dashboard dell'azienda
          * @description Qualsiasi membro dell'azienda la chiama; ogni sezione è null se manca il suo permesso:
          *     sites con sites.view; over_budget con sites.view e costs.view; costs_this_month con
-         *     costs.view; reports con reports.view; deadlines con deadlines.view. Le date sono quelle
+         *     costs.view; reports con reports.view; deadlines con deadlines.view; invoices con
+         *     invoices.view; progress_statements con estimates.view; quotes con quotes.view; purchase_orders con
+         *     purchases.view; warehouse con warehouse.view; vehicles con vehicles.view; employees con employees.view. Le date sono quelle
          *     di oggi in Italia. over_budget elenca, dal più sforato, al massimo 10 cantieri non chiusi
          *     con un budget e costi oltre il budget (manodopera e mezzi dai rapportini approvati, più
          *     i costi inseriti a mano, come in getSiteCostSummary). costs_this_month somma i costi del
          *     mese in corso con la stessa regola. deadlines elenca al massimo 10 scadenze aperte,
          *     scadute o entro 7 giorni, dalla più vecchia; i conteggi sono in getDeadlineSummary.
+         *     Per i grafici: costs_by_month (costs.view) dà gli ultimi 12 mesi, mese in corso
+         *     compreso, dal più vecchio, con la stessa regola dei costi divisa tra manodopera, mezzi e
+         *     costi inseriti a mano; site_progress (sites.view) elenca al massimo 10 cantieri attivi
+         *     con un cronoprogramma, dal più in ritardo rispetto al previsto.
          */
         get: operations["getDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ricerca rapida in tutta l'azienda
+         * @description Qualsiasi membro dell'azienda la chiama, per la ricerca della barra in alto. Cerca il
+         *     testo (da 2 a 100 caratteri, maiuscole e minuscole uguali) e restituisce al massimo 5
+         *     risultati per tipo, solo dei tipi che l'utente può vedere: client (clients.view: nome,
+         *     partita IVA, codice fiscale, email), supplier (suppliers.view, come i clienti), site
+         *     (sites.view: nome, codice, indirizzo, CIG e CUP), quote (quotes.view: oggetto e
+         *     numero, es. 2026/001), estimate (estimates.view: titolo), invoice (invoices.view:
+         *     numero, descrizione, CIG e CUP del cantiere), purchase_order (purchases.view: numero,
+         *     nome del fornitore, CIG e CUP del cantiere), employee
+         *     (employees.view: nome, cognome e codice fiscale), vehicle (vehicles.view: nome e
+         *     targa), deadline (deadlines.view: titolo), price_list_item (price_lists.view: codice e
+         *     descrizione della voce), site_document (documents.view: titolo e nome del file),
+         *     warehouse_item (warehouse.view: nome e codice dell'articolo di magazzino),
+         *     site_activity (sites.view: nome dell'attività del cronoprogramma), vehicle_document
+         *     (vehicles.view: descrizione o tipo per esteso, es. Assicurazione, e note, dove di
+         *     solito sta il numero della polizza; subtitle è il nome del mezzo), employee_document
+         *     (employees.view: descrizione o tipo per esteso, es. Formazione sicurezza, e note;
+         *     subtitle è cognome e nome del dipendente).
+         *     parent_id è il prezzario della voce, il cantiere del documento o dell'attività, il
+         *     mezzo del documento del mezzo o il dipendente del documento del dipendente, null per
+         *     gli altri tipi. Clienti e fornitori archiviati sono esclusi. CIG e CUP si trovano anche
+         *     scritti con gli spazi (es. B12C 3400 0560 007).
+         *     I tipi escono in quest'ordine; dentro un tipo prima i titoli che iniziano con il testo,
+         *     poi gli altri in ordine alfabetico.
+         */
+        get: operations["searchCompany"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1408,6 +3123,129 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/activities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Attività del cronoprogramma di tutti i cantieri
+         * @description Permesso: sites.view. Le attività di tutti i cantieri, in ordine di fine, inizio e nome,
+         *     con il cantiere. Filtri sul cantiere (filter[site]) e sulle attività da seguire
+         *     (filter[follow_up]), calcolate sulla data italiana e solo per i cantieri previsti o in
+         *     corso (non sospesi né chiusi): late le attività non finite (avanzamento sotto 100) con
+         *     la fine già passata; starting_soon quelle non ancora iniziate (avanzamento 0) che
+         *     iniziano entro 7 giorni da oggi, oggi compreso; in_progress quelle non finite in corso
+         *     oggi. Sono le stesse condizioni di activities in getDashboard. Con filter[from] e
+         *     filter[to] solo le attività che toccano il periodo (estremi compresi): finiscono dal
+         *     primo giorno in poi e iniziano entro l'ultimo; 422 se la fine viene prima dell'inizio.
+         *     Con filter[q] solo le attività con il testo nel nome o nelle note dell'attività o nel
+         *     nome o nel codice del cantiere, senza distinguere maiuscole e minuscole e senza
+         *     caratteri jolly, o nel CIG o nel CUP del cantiere (anche in parte, in minuscolo o con
+         *     gli spazi); un testo di soli spazi è ignorato.
+         */
+        get: operations["listCompanyActivities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/activities/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione in CSV delle attività del cronoprogramma di tutti i cantieri
+         * @description Permesso: sites.view. Stessi filtri e ordinamento di listCompanyActivities, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Date come 30/11/2026.
+         *     Poi le colonne «Giorni lavorativi» (working_days) e «Giorni lavorativi rimanenti»
+         *     (remaining_working_days) e in fondo CIG e CUP del cantiere, vuote se mancano. Il file si
+         *     chiama cronoprogramma.csv.
+         */
+        get: operations["exportCompanyActivities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/progress-statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * SAL di tutti i computi dell'azienda
+         * @description Permesso: estimates.view. Dal più recente per data del SAL. Filtri sul cantiere del
+         *     computo (filter[site]), sul cliente del computo (filter[client]), sul computo
+         *     (filter[estimate]; un computo di un'altra azienda dà un elenco vuoto), sullo stato
+         *     (filter[status]), sulla fattura (filter[invoiced]:
+         *     true i SAL già fatturati, false quelli senza fattura) e sulla data del SAL
+         *     (filter[from], filter[to]). Con filter[status]=approved e filter[invoiced]=false si
+         *     hanno i SAL approvati da fatturare. Con filter[q] solo i SAL con il testo nel titolo del
+         *     computo, nelle note del SAL, nel nome, nel codice, nel CIG o nel CUP del cantiere o nel
+         *     nome del cliente del computo, senza distinguere maiuscole e minuscole e senza caratteri jolly; un testo
+         *     di soli spazi è ignorato. total_amount e total_net_amount sommano i SAL che
+         *     rispettano i filtri, non solo quelli della pagina.
+         */
+        get: operations["listCompanyProgressStatements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/progress-statements/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione in CSV dei SAL di tutta l'azienda
+         * @description Permesso: estimates.view. Stessi filtri e ordinamento di listCompanyProgressStatements,
+         *     senza paginazione, nello stesso formato dell'esportazione dei clienti. Date come
+         *     30/11/2026, importi con la virgola decimale (1234,50). Il file si chiama sal.csv.
+         *     Le ultime due colonne sono il CIG e il CUP del cantiere del computo (vuote se il
+         *     cantiere non li ha, o se il computo non ha cantiere), per la contabilità degli appalti
+         *     pubblici.
+         */
+        get: operations["exportCompanyProgressStatements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/estimates/{estimate}/progress-statements": {
         parameters: {
             query?: never;
@@ -1470,6 +3308,71 @@ export interface paths {
          * @description Permesso: estimates.update. Solo in bozza: altrimenti 409 con code statement_not_draft.
          */
         delete: operations["deleteProgressStatement"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/progress-statements/{statement}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione del SAL in CSV
+         * @description Permesso: estimates.view. Senza permesso risponde 404, non 403. Le stesse righe di
+         *     getProgressStatement, nello stesso ordine, in qualunque stato, nel formato delle altre
+         *     esportazioni. Colonne: Codice, Descrizione, Unità, Prezzo, Quantità di contratto,
+         *     Quantità precedente, Quantità del SAL, Quantità progressiva, Importo precedente,
+         *     Importo del SAL, Importo progressivo; numeri con la virgola decimale (1234,50). Il
+         *     prezzo è vuoto per le voci senza righe in questo SAL (nel dettaglio è 0.00).
+         *     L'ultima riga, Totale, ha i tre importi del SAL; ritenuta e netto restano nel dettaglio
+         *     e nel PDF. Il file si chiama sal-1.csv.
+         */
+        get: operations["exportProgressStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/progress-statements/{statement}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * PDF del SAL
+         * @description Permesso: estimates.view. Il SAL in A4, pronto da stampare e firmare: intestazione
+         *     dell'azienda, computo con committente, cantiere, luogo dei lavori e, se il cantiere li
+         *     ha, CIG e CUP dell'appalto (riga «CIG … - CUP …») e le righe «Titolo edilizio: …»,
+         *     «Direttore dei lavori: …» e «Coordinatore sicurezza: …», voci con prezzo,
+         *     quantità precedenti, di questo SAL e progressive, importo di questo SAL, totali
+         *     (lavori a tutto il SAL, SAL precedenti, importo del SAL, ritenuta di garanzia e netto
+         *     se la ritenuta non è zero), note e spazio per le firme del direttore dei lavori e
+         *     dell'impresa. Una bozza esce con la dicitura «bozza». Il file si chiama sal-1.pdf.
+         *     Senza permesso risponde 404, non 403.
+         */
+        get: operations["getProgressStatementPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1590,6 +3493,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/price-lists/{list}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copia di un prezzario, con un aumento dei prezzi facoltativo
+         * @description Permessi: price_lists.view e price_lists.create (senza uno dei due risponde 403, un
+         *     prezzario di un’altra azienda non si trova: 404). Crea un prezzario nuovo con nome,
+         *     anno e note indicati e una copia di tutte le voci; con `price_change_percent` ogni
+         *     prezzo cambia di quella percentuale (es. 3.5 per l'aggiornamento dei prezzi all'anno
+         *     nuovo, -10 per uno sconto), arrotondato al centesimo. Il prezzario di partenza non
+         *     cambia, né le voci dei computi già prese.
+         */
+        post: operations["duplicatePriceList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/price-lists/{list}/items/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione delle voci di un prezzario in CSV
+         * @description Permesso: price_lists.view. Senza permesso risponde 404. Stessa ricerca e ordine
+         *     dell'elenco, senza paginazione, al massimo 20 000 voci, nello stesso formato
+         *     dell'esportazione dei clienti. Colonne Codice, Descrizione, Unità, Prezzo (con la
+         *     virgola decimale, 1234,50): il file si può modificare e reimportare con
+         *     importPriceListItems. Il file si chiama prezzario.csv.
+         */
+        get: operations["exportPriceListItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/price-lists/{list}/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importazione delle voci da un file CSV
+         * @description Permesso: price_lists.update (senza price_lists.view risponde 404). Il corpo è un
+         *     file CSV in UTF-8, al massimo 5 MB e 20 000 righe, come lo salva un foglio di
+         *     calcolo: separatore punto e virgola, virgola o tabulazione (si riconosce dalla
+         *     prima riga), campi tra virgolette doppie se serve. La prima riga ha i nomi delle
+         *     colonne, in qualsiasi ordine, senza distinguere maiuscole: codice (code),
+         *     descrizione (description), unità (unita, um, u.m., unit), prezzo (prezzo unitario,
+         *     unit_price). Le altre colonne si ignorano, come le righe vuote. Il prezzo si scrive
+         *     all'italiana (1.234,50) o con il punto (1234.50), al massimo due decimali, mai
+         *     negativo.
+         *
+         *     Le voci con un codice già nel prezzario (senza distinguere maiuscole) si
+         *     aggiornano, le altre si aggiungono; quelle che il file non nomina restano come
+         *     sono. Se anche una sola riga è sbagliata non cambia niente: 422 con gli errori
+         *     sotto `file` (colonne, codifica, file vuoto o troppo lungo) o sotto `row.<n>`, con
+         *     n il numero della riga nel file (la prima è l'intestazione), al massimo 50.
+         */
+        post: operations["importPriceListItems"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/price-lists/{list}/items/{item}": {
         parameters: {
             query?: never;
@@ -1646,6 +3644,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/employees/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importazione di dipendenti nuovi da un file CSV
+         * @description Permesso: employees.create. Come importClients: stesso formato del file (al massimo
+         *     5000 dipendenti), solo dipendenti nuovi, tutti o nessuno, errori sotto `file` o
+         *     `row.<n>`; il file di exportEmployees si reimporta così com'è. Colonne per nome:
+         *     cognome e nome sono obbligatorie; le altre sono codice fiscale, mansione, telefono,
+         *     email, assunzione (30/11/2026 oppure 2026-11-30), costo orario (28,50 oppure 28.50;
+         *     senza costs.view si controlla ma non si salva), attivo (sì o no, vuoto vale sì), note,
+         *     ferie annue (giorni interi), permessi annui (ore intere). Ogni riga si controlla come createEmployee;
+         *     un codice fiscale già presente nell'azienda o ripetuto nel file è un errore della riga.
+         */
+        post: operations["importEmployees"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/employees/export": {
         parameters: {
             query?: never;
@@ -1659,7 +3687,9 @@ export interface paths {
         /**
          * Esportazione dei dipendenti in CSV
          * @description Permesso: employees.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
-         *     paginazione, nello stesso formato dell'esportazione dei clienti. Costo orario con la virgola decimale, data di assunzione come 30/11/2026, Attivo Sì o No.
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Costo orario con la
+         *     virgola decimale, e la sua colonna c'è solo con costs.view; data di assunzione come
+         *     30/11/2026, Attivo Sì o No.
          *     Il file si chiama dipendenti.csv.
          */
         get: operations["exportEmployees"];
@@ -1705,6 +3735,578 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/employees/{employee}/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Cantieri di un dipendente
+         * @description Permessi: employees.view e sites.view. Senza employees.view il dipendente è «non
+         *     trovato» (404), come nella scheda; senza sites.view 403. Per la scheda del dipendente,
+         *     al contrario di getSiteTeam: i cantieri nella cui squadra è il dipendente, attivo o no,
+         *     di qualunque stato, prima quelli in corso, poi da iniziare, sospesi e chiusi, e a parità
+         *     in ordine di nome. Senza paginazione, come listSupplierSites.
+         */
+        get: operations["listEmployeeSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/sites/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Cantieri di un dipendente in CSV
+         * @description Permessi come listEmployeeSites: employees.view (senza, 404) e sites.view (senza, 403).
+         *     Le stesse righe nello stesso ordine, nello stesso formato di exportSupplierSites:
+         *     colonne Codice, Cantiere, Stato. Il file si chiama cantieri-dipendente.csv.
+         */
+        get: operations["exportEmployeeSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/work-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ore del dipendente per cantiere
+         * @description Permessi: employees.view (senza, 404 come per la scheda) e reports.view (senza, 403). Per la
+         *     scheda del dipendente: ore dai rapportini, giorni con ore e costo per cantiere, dal cantiere con
+         *     più ore. Il costo usa il costo orario fissato
+         *     all'approvazione del rapportino (attuale per i rapportini non approvati), come il
+         *     riepilogo dei costi del cantiere; è null se nessuna riga ha un costo orario, e sempre
+         *     null senza costs.view (anche per ogni cantiere). Senza filtri conta tutti i rapportini.
+         *     Con le ore anche le assenze dello stesso periodo (`absences`), per tipo: i giorni di
+         *     calendario delle assenze di tutto il giorno, contati solo dentro filter[from] e
+         *     filter[to], e le ore dei permessi. filter[status] vale solo per i rapportini.
+         *     In `payroll` le voci delle buste paga dagli stessi rapportini, con gli stessi filtri:
+         *     ore di straordinario, giorni di trasferta e ore perse per maltempo.
+         */
+        get: operations["getEmployeeWorkSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/work-summary/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ore del dipendente per cantiere in CSV
+         * @description Permessi come getEmployeeWorkSummary: employees.view (senza, 404) e reports.view (senza, 403).
+         *     Gli stessi cantieri nello stesso ordine e con gli stessi filtri, nello stesso formato
+         *     delle altre esportazioni: colonne Codice, Cantiere, Ore, Giorni, poi Costo solo con
+         *     costs.view, poi Primo giorno, Ultimo giorno, Di cui straordinario, Giorni di trasferta,
+         *     Ore perse per maltempo, Di cui festive, e in fondo una riga Totale con ore, giorni,
+         *     costo (con costs.view) e le quattro voci di payroll di
+         *     tutto il periodo
+         *     (nel totale un giorno di trasferta su due cantieri conta una volta). I cantieri dove nel
+         *     periodo il dipendente ha soltanto ore perse per maltempo, assenti da sites, vengono dopo
+         *     gli altri in ordine di nome, con ore e giorni a zero. Ore e importi con la virgola decimale
+         *     (12,50), date come 30/11/2026, costo vuoto se il costo orario manca. Il file si chiama
+         *     ore-dipendente.csv.
+         */
+        get: operations["exportEmployeeWorkSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/absences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Assenze di un dipendente
+         * @description Permesso: employees.view (senza, 404 come per la scheda). Ferie, malattie, permessi e
+         *     infortuni del dipendente, senza paginazione, dalla più recente. Con filter[from] e
+         *     filter[to] (estremi compresi) solo le assenze che toccano quel periodo, per il calendario.
+         */
+        get: operations["listEmployeeAbsences"];
+        put?: never;
+        /**
+         * Nuova assenza
+         * @description Permesso: employees.update. Un'assenza non può sovrapporsi a un'altra dello stesso
+         *     dipendente (422 su starts_on).
+         */
+        post: operations["createEmployeeAbsence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/absences/{absence}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                absence: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di un'assenza
+         * @description Permesso: employees.update. Si inviano tutti i campi. If-Match come per i dipendenti.
+         */
+        put: operations["updateEmployeeAbsence"];
+        post?: never;
+        /**
+         * Eliminazione di un'assenza
+         * @description Permesso: employees.update. If-Match come per i dipendenti.
+         */
+        delete: operations["deleteEmployeeAbsence"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/leave-carryovers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ferie e permessi riportati dagli anni precedenti
+         * @description Permesso: employees.view (senza, 404 come per la scheda). Per ogni anno, i giorni di
+         *     ferie e le ore di permesso non goduti riportati dall'anno prima (come nella busta
+         *     paga), dal più recente,
+         *     senza paginazione.
+         */
+        get: operations["listLeaveCarryovers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/leave-carryovers/{year}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                /** @description Anno in cui le ferie si riportano, da 2000 a 2100. */
+                year: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Ferie e permessi riportati dall'anno precedente
+         * @description Permesso: employees.update. Imposta i giorni di ferie e le ore di permesso riportati
+         *     nell'anno indicato (crea il riporto se manca); un campo che manca resta com'era. Senza If-Match: il valore è assoluto. Un anno fuori
+         *     dall'intervallo è 404, come un indirizzo che non esiste.
+         *     Nel registro delle modifiche compare come modifica del dipendente (entity employee),
+         *     con il campo leave_carryover e senza il valore; anche l'eliminazione.
+         */
+        put: operations["setLeaveCarryover"];
+        post?: never;
+        /**
+         * Eliminazione del riporto di un anno
+         * @description Permesso: employees.update. 404 se il riporto non c'è.
+         */
+        delete: operations["deleteLeaveCarryover"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/absences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Assenze di tutti i dipendenti
+         * @description Permesso: employees.view. Le assenze di tutti i dipendenti, dalla più recente, con il
+         *     dipendente: per il calendario delle ferie e per sapere chi manca oggi
+         *     (filter[from] e filter[to] uguali a oggi). Con filter[from] e filter[to] (estremi
+         *     compresi) solo le assenze che toccano quel periodo, come in listEmployeeAbsences.
+         */
+        get: operations["listCompanyAbsences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/absences/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione in CSV delle assenze di tutti i dipendenti
+         * @description Permesso: employees.view. Stessi filtri e ordinamento di listCompanyAbsences, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti: per il consulente del
+         *     lavoro. Tipo per esteso (Ferie, Malattia, Permesso, Infortunio, Altro) e sigla del foglio
+         *     ore (FE, MA, PE, IN, AL), date come 30/11/2026, giorni di calendario e giorni
+         *     lavorativi (come working_days, vuoti per un permesso a ore), ore di un permesso con la
+         *     virgola. Il file si chiama assenze.csv.
+         */
+        get: operations["exportCompanyAbsences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/absences/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Assenze di tutti i dipendenti in formato calendario (iCalendar)
+         * @description Permesso: employees.view. Le assenze come file .ics (RFC 5545) da aprire nel calendario
+         *     del telefono o del computer, per sapere chi manca senza aprire il gestionale. Stessi
+         *     filtri di listCompanyAbsences. Ogni assenza è un evento di giorni interi, dal primo
+         *     all'ultimo giorno compresi, senza promemoria e segnato come libero; il titolo è
+         *     «Cognome Nome – Tipo», con le ore di un permesso (es. «Permesso 2,5 h»). Nella
+         *     descrizione ci sono tipo, sigla del foglio ore, periodo, giorni (con i lavorativi) o
+         *     ore e note. L'UID
+         *     dell'evento resta lo stesso a ogni esportazione, così il calendario aggiorna l'evento
+         *     invece di duplicarlo. Il file si chiama assenze.ics.
+         */
+        get: operations["exportAbsencesCalendar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/absences/totals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Assenze dell'anno per dipendente
+         * @description Permesso: employees.view. Quante assenze ha fatto ogni dipendente in un anno solare, per
+         *     tipo: per il titolare che controlla le ferie godute e per il consulente del lavoro.
+         *     days: giorni di calendario delle assenze di tutto il giorno, solo quelli dentro l'anno
+         *     (le ferie a cavallo di Capodanno si dividono tra i due anni); working_days: gli stessi
+         *     giorni senza sabati, domeniche e festività nazionali, come working_days dell'assenza;
+         *     hours: ore dei permessi.
+         *     Ci sono tutti i dipendenti attivi, anche senza assenze, e quelli non più attivi che
+         *     hanno assenze nell'anno, per cognome e nome. kinds ha sempre tutti i tipi, nell'ordine
+         *     di EmployeeAbsenceKind, anche a zero. year è l'anno in corso (ora italiana) se non
+         *     indicato.
+         *     Con filter[employee] solo quel dipendente, attivo o no, anche senza assenze (per la
+         *     scheda del dipendente); un dipendente che non c'è dà un elenco vuoto. Con
+         *     filter[vacation]=exceeded solo chi ha vacation_remaining sotto zero, con
+         *     filter[permit]=exceeded solo chi ha permit_remaining sotto zero. totals somma i
+         *     dipendenti dell'elenco.
+         */
+        get: operations["getAbsenceTotals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/holidays": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Festività dell'anno
+         * @description Qualsiasi membro dell'azienda le vede, senza permessi: servono ai calendari
+         *     dell'interfaccia (scadenze, assenze, cronoprogramma, rapportini). Sono le stesse
+         *     festività di holiday nei rapportini e di working_days nelle assenze: le festività
+         *     nazionali con il lunedì dell'Angelo (Pasquetta) e, se indicato nei dati dell'azienda
+         *     (patron_saint_day), il santo patrono, in ordine di data. Le domeniche non ci sono:
+         *     sono festive sempre. Se il patrono cade in una festività nazionale la data compare una
+         *     volta sola, come nazionale. year è l'anno in corso (ora italiana) se non indicato.
+         */
+        get: operations["listHolidays"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/working-days": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Giorni lavorativi tra due date
+         * @description Qualsiasi membro dell'azienda lo chiede, senza permessi, come listHolidays: serve alle
+         *     anteprime dei form (assenze, attività del cronoprogramma, scadenze) senza ricalcolare
+         *     nell'interfaccia Pasquetta e santo patrono. Conta i giorni da lunedì a venerdì da from
+         *     a to, entrambi compresi, senza le festività nazionali con il lunedì dell'Angelo e il
+         *     santo patrono dell'azienda: le stesse regole di working_days nelle assenze e nel
+         *     cronoprogramma. holidays sono le festività dentro il periodo, in ordine di data, anche
+         *     quelle che cadono di sabato o di domenica (non tolgono giorni lavorativi). to non può
+         *     essere prima di from, e il periodo non può superare i 731 giorni (due anni).
+         */
+        get: operations["countWorkingDays"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/working-days/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ultimo giorno dopo un numero di giorni lavorativi
+         * @description Qualsiasi membro dell'azienda lo chiede, senza permessi, come countWorkingDays: serve
+         *     ai form del cronoprogramma («dura 10 giorni lavorativi, quando finisce?») senza
+         *     ricalcolare nell'interfaccia Pasquetta e santo patrono. to è il giorno in cui cade il
+         *     working_days-esimo giorno lavorativo contando da from, che conta se è lavorativo: con le
+         *     regole di countWorkingDays, il conteggio da from a to dà proprio working_days e to è
+         *     sempre un giorno lavorativo. Se from cade di sabato, di domenica o in una festività, si
+         *     comincia dal primo giorno lavorativo successivo. days sono i giorni di calendario da
+         *     from a to, entrambi compresi. working_days va da 1 a 500 (circa due anni).
+         */
+        get: operations["findWorkingDaysEnd"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/working-days/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Primo giorno prima di un numero di giorni lavorativi
+         * @description Qualsiasi membro dell'azienda lo chiede, senza permessi, come findWorkingDaysEnd, di
+         *     cui è l'inverso: serve a pianificare all'indietro da una data fissa («la consegna è il
+         *     20, l'ordine va fatto 10 giorni lavorativi prima») senza ricalcolare nell'interfaccia
+         *     Pasquetta e santo patrono. from è il giorno in cui cade il working_days-esimo giorno
+         *     lavorativo contando all'indietro da to, che conta se è lavorativo: con le regole di
+         *     countWorkingDays, il conteggio da from a to dà proprio working_days e from è sempre un
+         *     giorno lavorativo. Se to cade di sabato, di domenica o in una festività, si comincia dal
+         *     giorno lavorativo precedente. days sono i giorni di calendario da from a to, entrambi
+         *     compresi. working_days va da 1 a 500 (circa due anni).
+         */
+        get: operations["findWorkingDaysStart"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/holidays/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Festività dell'anno in formato calendario (iCalendar)
+         * @description Qualsiasi membro dell'azienda lo scarica, senza permessi, come listHolidays. Le stesse
+         *     festività di listHolidays come file .ics (RFC 5545), da aggiungere al calendario del
+         *     telefono o del computer: ogni festività è un evento di un giorno intero, senza
+         *     promemoria e segnato come libero. Il titolo è il nome della festività (es. «Natale»,
+         *     «Santo patrono»); la descrizione dice se è nazionale o il santo patrono dell'azienda.
+         *     L'UID dell'evento dipende solo da azienda e data, così una nuova esportazione aggiorna
+         *     gli eventi invece di duplicarli. year è l'anno in corso (ora italiana) se non indicato.
+         *     Il file si chiama festivita-AAAA.ics (es. festivita-2026.ics).
+         */
+        get: operations["exportHolidaysCalendar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/absences/close-year": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Chiusura dell'anno di ferie e permessi
+         * @description Permesso: employees.update. Per ogni dipendente attivo con ferie o permessi spettanti,
+         *     le ferie residue e le ore di permesso residue dell'anno (come in getAbsenceTotals)
+         *     diventano il riporto dell'anno dopo (setLeaveCarryover), anche negative. Si scrive
+         *     solo la parte con le spettanze indicate: l'altra resta com'era. I dipendenti non
+         *     attivi e quelli senza spettanze non si toccano. Ripetuta, ricalcola gli stessi valori
+         *     (dopo una correzione delle assenze si rilancia). Se un residuo esce dall'intervallo
+         *     del riporto (giorni da -366 a 366, ore da -2000 a 2000) non si scrive nulla: 422 sotto
+         *     `_` con i dipendenti da sistemare. Nel registro delle modifiche come setLeaveCarryover.
+         */
+        post: operations["closeAbsenceYear"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/absences/totals/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione in CSV delle assenze dell'anno per dipendente
+         * @description Permesso: employees.view. Le stesse righe di getAbsenceTotals, nello stesso formato
+         *     dell'esportazione dei clienti: una riga per dipendente con giorni, giorni lavorativi e
+         *     ore di ogni tipo (ore con la virgola) e una riga finale «Totale». Il file si chiama
+         *     assenze-AAAA.csv, con l'anno. Gli stessi filtri di getAbsenceTotals.
+         */
+        get: operations["exportAbsenceTotals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/vehicles": {
         parameters: {
             query?: never;
@@ -1732,6 +4334,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/vehicles/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importazione di mezzi nuovi da un file CSV
+         * @description Permesso: vehicles.create. Come importClients: stesso formato del file (al massimo
+         *     5000 mezzi), solo mezzi nuovi, tutti o nessuno, errori sotto `file` o `row.<n>`; il
+         *     file di exportVehicles si reimporta così com'è. Colonne per nome: nome è
+         *     obbligatoria; le altre sono tipo (Automezzo, Macchina operatrice o Attrezzatura,
+         *     vuoto vale Automezzo), targa, marca e modello, costo orario (45,00 oppure 45.00;
+         *     senza costs.view si controlla ma non si salva), in uso (sì o no, vuoto vale sì), note.
+         *     Ogni riga si controlla come createVehicle;
+         *     una targa già presente nell'azienda o ripetuta nel file è un errore della riga.
+         */
+        post: operations["importVehicles"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/vehicles/export": {
         parameters: {
             query?: never;
@@ -1745,7 +4377,14 @@ export interface paths {
         /**
          * Esportazione dei mezzi in CSV
          * @description Permesso: vehicles.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
-         *     paginazione, nello stesso formato dell'esportazione dei clienti. Tipo tradotto (Automezzo, Macchina operatrice, Attrezzatura), costo orario con la virgola decimale.
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Tipo tradotto
+         *     (Automezzo, Macchina operatrice, Attrezzatura), costo orario con la virgola decimale,
+         *     e la sua colonna c'è solo con costs.view.
+         *     Dopo le note, tre colonne vengono dall'intervento più recente (`last_maintenance`):
+         *     data (gg/mm/aaaa), tipo per esteso e contachilometri o contaore; vuote se non ce ne
+         *     sono. Le ultime tre vengono dal rifornimento più recente (`last_refueling`): data,
+         *     litri con la virgola e contachilometri o contaore; vuote se non ce ne sono.
+         *     L'importazione dei mezzi le ignora tutte e sei.
          *     Il file si chiama mezzi.csv.
          */
         get: operations["exportVehicles"];
@@ -1789,6 +4428,507 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/vehicles/{vehicle}/work-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ore del mezzo per cantiere
+         * @description Permessi: vehicles.view (senza, 404 come per la scheda) e reports.view (senza, 403). Per la
+         *     scheda del mezzo: ore dai rapportini, giorni con ore e costo per cantiere, dal cantiere con
+         *     più ore. Il costo usa il costo orario fissato
+         *     all'approvazione del rapportino (attuale per i rapportini non approvati), come il
+         *     riepilogo dei costi del cantiere; è null se nessuna riga ha un costo orario, e sempre
+         *     null senza costs.view (anche per ogni cantiere). Senza filtri conta tutti i rapportini.
+         *     maintenance: numero e spesa delle manutenzioni del mezzo nello stesso periodo (filter[status]
+         *     non conta).
+         *     fuel: numero di rifornimenti, litri e spesa del carburante nello stesso periodo
+         *     (filter[status] non conta), con il consumo medio (litri ogni 100 km per gli automezzi,
+         *     litri all'ora per gli altri).
+         */
+        get: operations["getVehicleWorkSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/{vehicle}/work-summary/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Ore del mezzo per cantiere in CSV
+         * @description Permessi come getVehicleWorkSummary: vehicles.view (senza, 404) e reports.view (senza, 403).
+         *     Gli stessi cantieri nello stesso ordine e con gli stessi filtri, nello stesso formato
+         *     delle altre esportazioni: colonne Codice, Cantiere, Ore, Giorni, poi Costo solo con
+         *     costs.view, poi Primo giorno, Ultimo giorno, e in fondo una riga Totale con ore, giorni
+         *     e costo (con costs.view) di tutto il periodo. Ore e
+         *     importi con la virgola decimale (12,50), date come 30/11/2026, costo vuoto se il costo
+         *     orario manca. Il file si chiama ore-mezzo.csv.
+         */
+        get: operations["exportVehicleWorkSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Documenti di un dipendente
+         * @description Permesso: employees.view (senza, 404 come per la scheda). Idoneità sanitaria, attestati
+         *     dei corsi di sicurezza, primo soccorso, antincendio, patentini e gli altri documenti del
+         *     dipendente, senza paginazione (sono pochi), ordinati per scadenza: prima quelli che
+         *     scadono prima, in fondo quelli senza.
+         */
+        get: operations["listEmployeeDocuments"];
+        put?: never;
+        /**
+         * Nuovo documento del dipendente
+         * @description Permesso: employees.update. Se il documento scade, il backend ne fa una scadenza del
+         *     dipendente (`employee_document_id` nella scadenza; tipo `medical_check` per l'idoneità
+         *     sanitaria, `training` per corsi e patentini, `other` per gli altri).
+         */
+        post: operations["createEmployeeDocument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/documents/{document}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di un documento del dipendente
+         * @description Permesso: employees.update. Si inviano tutti i campi. If-Match come per i dipendenti.
+         *     Una scadenza nuova (un rinnovo) riapre la scadenza del dipendente; null la elimina.
+         */
+        put: operations["updateEmployeeDocument"];
+        post?: never;
+        /**
+         * Eliminazione di un documento del dipendente
+         * @description Permesso: employees.update. If-Match come per i dipendenti. Elimina anche la sua scadenza.
+         */
+        delete: operations["deleteEmployeeDocument"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/employees/{employee}/documents/{document}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Il file di un documento del dipendente
+         * @description Permesso: employees.view. Senza permesso, o se il documento non ha un file, risponde
+         *     404. Il file arriva come allegato (Content-Disposition: attachment, con il nome
+         *     originale).
+         */
+        get: operations["getEmployeeDocumentFile"];
+        /**
+         * Caricamento o sostituzione del file di un documento del dipendente
+         * @description Permesso: employees.update. Il corpo è il file, con il suo Content-Type: PDF, JPEG o
+         *     PNG (l'attestato o il giudizio di idoneità, scansionato o fotografato), al massimo 20 MB. Il contenuto deve
+         *     corrispondere al tipo dichiarato (altrimenti 422 sotto file). Nome del file nella query.
+         *     Un file già presente viene sostituito. If-Match con la versione del documento: la
+         *     risposta è il documento con la versione nuova.
+         */
+        put: operations["setEmployeeDocumentFile"];
+        post?: never;
+        /**
+         * Eliminazione del file di un documento del dipendente
+         * @description Permesso: employees.update. If-Match con la versione del documento. Il documento resta,
+         *     senza file; la risposta è il documento con la versione nuova. Se non c'è un file, 404.
+         */
+        delete: operations["deleteEmployeeDocumentFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/{vehicle}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Documenti di un mezzo
+         * @description Permesso: vehicles.view (senza, 404 come per la scheda). Assicurazione, bollo, carta di
+         *     circolazione e gli altri documenti del mezzo, senza paginazione (sono pochi), ordinati
+         *     per scadenza: prima quelli che scadono prima, in fondo quelli senza.
+         */
+        get: operations["listVehicleDocuments"];
+        put?: never;
+        /**
+         * Nuovo documento del mezzo
+         * @description Permesso: vehicles.update. Se il documento scade, il backend ne fa una scadenza del
+         *     mezzo (tipo `vehicle`, `vehicle_document_id` nella scadenza).
+         */
+        post: operations["createVehicleDocument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/{vehicle}/documents/{document}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di un documento del mezzo
+         * @description Permesso: vehicles.update. Si inviano tutti i campi. If-Match come per i mezzi. Una
+         *     scadenza nuova (un rinnovo) riapre la scadenza del mezzo; null la elimina.
+         */
+        put: operations["updateVehicleDocument"];
+        post?: never;
+        /**
+         * Eliminazione di un documento del mezzo
+         * @description Permesso: vehicles.update. If-Match come per i mezzi. Elimina anche la sua scadenza.
+         */
+        delete: operations["deleteVehicleDocument"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/{vehicle}/documents/{document}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Il file di un documento del mezzo
+         * @description Permesso: vehicles.view. Senza permesso, o se il documento non ha un file, risponde
+         *     404. Il file arriva come allegato (Content-Disposition: attachment, con il nome
+         *     originale).
+         */
+        get: operations["getVehicleDocumentFile"];
+        /**
+         * Caricamento o sostituzione del file di un documento del mezzo
+         * @description Permesso: vehicles.update. Il corpo è il file, con il suo Content-Type: PDF, JPEG o
+         *     PNG (una scansione o una foto del documento), al massimo 20 MB. Il contenuto deve
+         *     corrispondere al tipo dichiarato (altrimenti 422 sotto file). Nome del file nella query.
+         *     Un file già presente viene sostituito. If-Match con la versione del documento: la
+         *     risposta è il documento con la versione nuova.
+         */
+        put: operations["setVehicleDocumentFile"];
+        post?: never;
+        /**
+         * Eliminazione del file di un documento del mezzo
+         * @description Permesso: vehicles.update. If-Match con la versione del documento. Il documento resta,
+         *     senza file; la risposta è il documento con la versione nuova. Se non c'è un file, 404.
+         */
+        delete: operations["deleteVehicleDocumentFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/{vehicle}/maintenances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Manutenzioni di un mezzo
+         * @description Permesso: vehicles.view (senza, 404 come per la scheda). Tagliandi, riparazioni,
+         *     revisioni e gomme del mezzo, senza paginazione, dalla più recente, con la spesa totale
+         *     dell'elenco. Con filter[from] e filter[to] (estremi compresi) solo quelle del periodo.
+         */
+        get: operations["listVehicleMaintenances"];
+        put?: never;
+        /**
+         * Nuova manutenzione
+         * @description Permesso: vehicles.update. Il fornitore, se indicato, deve essere dell'azienda.
+         */
+        post: operations["createVehicleMaintenance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/{vehicle}/maintenances/{maintenance}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                maintenance: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di una manutenzione
+         * @description Permesso: vehicles.update. Si inviano tutti i campi. If-Match come per i mezzi.
+         */
+        put: operations["updateVehicleMaintenance"];
+        post?: never;
+        /**
+         * Eliminazione di una manutenzione
+         * @description Permesso: vehicles.update. If-Match come per i mezzi.
+         */
+        delete: operations["deleteVehicleMaintenance"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/{vehicle}/refuelings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Rifornimenti di un mezzo
+         * @description Permesso: vehicles.view (senza, 404 come per la scheda). I rifornimenti di carburante
+         *     del mezzo, senza paginazione, dal più recente, con i litri e la spesa totali
+         *     dell'elenco. Con filter[from] e filter[to] (estremi compresi) solo quelli del periodo.
+         */
+        get: operations["listVehicleRefuelings"];
+        put?: never;
+        /**
+         * Nuovo rifornimento
+         * @description Permesso: vehicles.update. Il fornitore, se indicato, deve essere dell'azienda.
+         */
+        post: operations["createVehicleRefueling"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicles/{vehicle}/refuelings/{refueling}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                refueling: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Modifica di un rifornimento
+         * @description Permesso: vehicles.update. Si inviano tutti i campi. If-Match come per i mezzi.
+         */
+        put: operations["updateVehicleRefueling"];
+        post?: never;
+        /**
+         * Eliminazione di un rifornimento
+         * @description Permesso: vehicles.update. If-Match come per i mezzi.
+         */
+        delete: operations["deleteVehicleRefueling"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicle-maintenances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Manutenzioni di tutti i mezzi
+         * @description Permesso: vehicles.view (senza, 403 come per l'esportazione). Le stesse righe di
+         *     exportVehicleMaintenances, nello stesso ordine (dalla più recente) e con gli stessi
+         *     filtri, a pagine, con il mezzo di ogni manutenzione. total_amount è la somma delle spese
+         *     di tutte le manutenzioni che rispettano i filtri, non solo della pagina (quelle senza
+         *     importo contano zero). Con filter[vehicle] di un mezzo che non c'è l'elenco è vuoto.
+         */
+        get: operations["listCompanyVehicleMaintenances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicle-maintenances/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione in CSV delle manutenzioni di tutti i mezzi
+         * @description Permesso: vehicles.view. Le manutenzioni di tutti i mezzi, dalla più recente, nello
+         *     stesso formato dell'esportazione dei clienti: per il commercialista. Tipo per esteso
+         *     (Tagliando, Riparazione, Revisione, Gomme, Altro), date come 30/11/2026, spesa con la
+         *     virgola, vuota se manca. Con filter[from] e filter[to] (estremi compresi) solo quelle del
+         *     periodo, con filter[vehicle] solo quelle di un mezzo, con filter[q] solo quelle con il
+         *     testo nella descrizione o nelle note. L'ultima colonna, «Prossima manutenzione», è la
+         *     data di `next_due_on`, vuota se manca. Il file si chiama manutenzioni.csv.
+         */
+        get: operations["exportVehicleMaintenances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicle-refuelings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Rifornimenti di tutti i mezzi
+         * @description Permesso: vehicles.view (senza, 403 come per l'esportazione). Le stesse righe di
+         *     exportVehicleRefuelings, nello stesso ordine (dal più recente) e con gli stessi filtri,
+         *     a pagine, con il mezzo di ogni rifornimento e il consumo come in listVehicleRefuelings.
+         *     total_liters e total_amount sono le somme di tutti i rifornimenti che rispettano i
+         *     filtri, non solo della pagina. Con filter[vehicle] di un mezzo che non c'è l'elenco è
+         *     vuoto. Con filter[q] solo i rifornimenti con il testo nelle note, nel nome o nella targa
+         *     del mezzo o nel nome del distributore, senza distinguere maiuscole e minuscole e senza
+         *     caratteri jolly; un testo di soli spazi è ignorato.
+         */
+        get: operations["listCompanyVehicleRefuelings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/vehicle-refuelings/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione in CSV dei rifornimenti di tutti i mezzi
+         * @description Permesso: vehicles.view. I rifornimenti di tutti i mezzi, dal più recente, nello stesso
+         *     formato dell'esportazione dei clienti: per il commercialista o il controllo dei consumi.
+         *     Colonne Data, Mezzo, Targa, Litri, Spesa, Km o ore, Distributore, Note, Consumo; date
+         *     come 30/11/2026, litri, spesa e consumo con la virgola. Il consumo è quello del campo
+         *     consumption del rifornimento (litri ogni 100 km o all'ora), vuoto se manca. Con filter[from] e filter[to] (estremi
+         *     compresi) solo quelli del periodo, con filter[vehicle] solo quelli di un mezzo. Il file
+         *     si chiama rifornimenti.csv.
+         */
+        get: operations["exportVehicleRefuelings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/estimates": {
         parameters: {
             query?: never;
@@ -1801,7 +4941,8 @@ export interface paths {
         };
         /**
          * Elenco dei computi metrici
-         * @description Permesso: estimates.view. La ricerca guarda titolo, indirizzo e cliente.
+         * @description Permesso: estimates.view. La ricerca guarda titolo, indirizzo e cliente, e il CIG e il
+         *     CUP del cantiere (anche in parte, in minuscolo o con gli spazi).
          */
         get: operations["listEstimates"];
         put?: never;
@@ -1830,8 +4971,9 @@ export interface paths {
          * Esportazione dei computi metrici in CSV
          * @description Permesso: estimates.view. Stessi filtri, ricerca e ordinamento dell'elenco, senza
          *     paginazione, nello stesso formato dell'esportazione dei clienti. Una riga per computo,
-         *     con il totale (importo con la virgola decimale, anche negativo).
-         *     Il file si chiama computi.csv.
+         *     con il totale (importo con la virgola decimale, anche negativo). Le ultime due colonne
+         *     sono il CIG e il CUP del cantiere, vuote se il computo non ha cantiere o il cantiere
+         *     non li ha. Il file si chiama computi.csv.
          */
         get: operations["exportEstimates"];
         put?: never;
@@ -1926,6 +5068,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/estimates/{estimate}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * PDF del computo metrico estimativo
+         * @description Permesso: estimates.view. Il computo in A4, da stampare o allegare: intestazione
+         *     dell'azienda, titolo con committente, cantiere e luogo dei lavori (con la riga «CIG … -
+         *     CUP …» del cantiere, solo se ne ha almeno uno), capitoli
+         *     nell'ordine dell'albero (prima le voci, poi i sottocapitoli), per ogni voce il numero
+         *     progressivo, codice, descrizione, righe di misura (parti uguali, lunghezza,
+         *     larghezza, altezza o peso, quantità), «Sommano» con unità di misura, quantità,
+         *     prezzo e importo; il totale di ogni capitolo e del computo, e un riepilogo per
+         *     capitoli. Il file si chiama computo.pdf. Senza permesso risponde 404, non 403.
+         *
+         *     Con prices=false esce il «Computo metrico» senza prezzi, da mandare ai fornitori e
+         *     ai subappaltatori per chiedere un'offerta: stesse voci, righe di misura e quantità,
+         *     colonne Prezzo e Importo vuote, niente totali né riepilogo. Il file si chiama
+         *     computo-senza-prezzi.pdf.
+         */
+        get: operations["getEstimatePdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/estimates/{estimate}/items/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione del computo metrico in CSV
+         * @description Permesso: estimates.view. Senza permesso risponde 404. Il computo intero, nello
+         *     stesso formato dell'esportazione dei clienti, nell'ordine dell'albero (come il PDF):
+         *     una riga per capitolo, poi le sue voci, ognuna seguita dalle sue righe di misura,
+         *     poi i sottocapitoli; l'ultima riga ha il totale. Colonne Tipo (Capitolo, Voce,
+         *     Misura, Totale), Livello (1 per i capitoli principali), N. (numero progressivo della
+         *     voce), Codice, Descrizione, Unità, Parti uguali, Lunghezza, Larghezza, Altezza/peso,
+         *     Quantità, Prezzo, Importo; numeri con la virgola decimale (1234,50), anche negativi.
+         *     Il file si chiama computo.csv.
+         */
+        get: operations["exportEstimateItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/estimates/{estimate}/structure": {
         parameters: {
             query?: never;
@@ -1952,7 +5161,10 @@ export interface paths {
          * @description Permesso: estimates.update. Si inviano tutti i capitoli e tutte le voci del computo,
          *     ognuno una volta sola, con il nuovo genitore; l'ordine dell'elenco dà la posizione
          *     dentro ciascun genitore. Titoli, prezzi e misure non cambiano. If-Match vuole l'ETag
-         *     della struttura. Al massimo 4 livelli di capitoli, senza cicli.
+         *     della struttura. Al massimo 4 livelli di capitoli, senza cicli. Con measurements, che
+         *     è facoltativo, si riordinano anche le righe di misura (tutte, ognuna una volta sola,
+         *     con la voce a cui appartengono: possono anche passare a un'altra voce); senza,
+         *     restano dove sono.
          */
         put: operations["arrangeEstimateStructure"];
         post?: never;
@@ -2188,8 +5400,8 @@ export interface paths {
         };
         /**
          * Numerazioni dei documenti
-         * @description Permesso: settings.view. Per ora i soli preventivi: il prossimo numero dell'anno in
-         *     corso (data italiana).
+         * @description Permesso: settings.view. Preventivi e ordini ai fornitori: il prossimo numero dell'anno
+         *     in corso (data italiana).
          */
         get: operations["getNumbering"];
         put?: never;
@@ -2219,6 +5431,32 @@ export interface paths {
          *     L'anno è quello in corso, il precedente o il successivo.
          */
         put: operations["setQuoteNumbering"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/settings/numbering/purchase-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Prossimo numero degli ordini ai fornitori di un anno
+         * @description Permesso: settings.update. Come setQuoteNumbering: il prossimo ordine creato con una
+         *     data di quell'anno prende next_number. Si può anche abbassare, ma mai fino a un numero
+         *     già usato (409 code number_in_use). L'anno è quello in corso, il precedente o il
+         *     successivo. La risposta riporta le numerazioni di quell'anno.
+         */
+        put: operations["setPurchaseOrderNumbering"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2256,6 +5494,271 @@ export interface paths {
          * @description Permesso: settings.update. Senza logo risponde comunque 204.
          */
         delete: operations["deleteCompanyLogo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Registro delle fatture emesse e ricevute
+         * @description Permesso: invoices.view. Dalla più recente. total_amount è la somma dei totali delle
+         *     fatture che rispettano i filtri, non solo della pagina; outstanding_amount la parte
+         *     ancora da pagare o incassare (somma dei remaining_amount).
+         */
+        get: operations["listInvoices"];
+        put?: never;
+        /**
+         * Registrazione di una fattura
+         * @description Permesso: invoices.create. Se ha una scadenza di pagamento, nasce anche la scadenza
+         *     nello scadenziario (invoice_out per le emesse, invoice_in per le ricevute). Un numero
+         *     già usato nello stesso anno (per le ricevute: dello stesso fornitore) risponde 422
+         *     sotto number.
+         */
+        post: operations["createInvoice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invoices/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione del registro delle fatture in CSV
+         * @description Permesso: invoices.view. Stessi filtri e ordinamento dell'elenco, senza paginazione,
+         *     nello stesso formato dell'esportazione dei clienti. Date come 30/11/2026, importi con
+         *     la virgola decimale (1234,50). Con il netto a pagare ci sono anche il già pagato
+         *     (paid_amount) e il residuo (remaining_amount); dopo la scissione dei pagamenti, Sì o No
+         *     per lo svincolo della ritenuta di garanzia (retention_release). In fondo la colonna
+         *     Ordine, con il numero dell'ordine al fornitore collegato (vuota senza ordine), poi
+         *     Documento (Fattura o Nota di credito), Fattura stornata (il numero, solo sulle note), CIG
+         *     e CUP del cantiere (vuote se il cantiere non li ha). Il file si chiama fatture.csv.
+         */
+        get: operations["exportInvoices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invoices/{invoice}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Una fattura
+         * @description Permesso: invoices.view. Senza permesso risponde 404, non 403.
+         */
+        get: operations["getInvoice"];
+        /**
+         * Modifica di una fattura, anche per segnarla pagata
+         * @description Permesso: invoices.update. Si inviano tutti i campi. La scadenza nello scadenziario
+         *     segue la fattura: si sposta con la data di pagamento, si chiude quando paid_on è
+         *     valorizzato, si riapre se torna null, sparisce se la scadenza di pagamento torna null.
+         */
+        put: operations["updateInvoice"];
+        post?: never;
+        /**
+         * Eliminazione di una fattura
+         * @description Permesso: invoices.delete. Elimina anche la sua scadenza nello scadenziario. Una fattura
+         *     con note di credito non si elimina (409, code has_documents): prima si eliminano le note.
+         */
+        delete: operations["deleteInvoice"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invoices/{invoice}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Il PDF di una fattura
+         * @description Permesso: invoices.view. Senza permesso, o se la fattura non ha un file, risponde
+         *     404. Il file arriva come allegato (Content-Disposition: attachment, con il nome
+         *     originale).
+         */
+        get: operations["getInvoiceFile"];
+        /**
+         * Caricamento o sostituzione del PDF di una fattura
+         * @description Permesso: invoices.update. Il corpo è il file, con il suo Content-Type: PDF (la copia di
+         *     cortesia della fattura elettronica), JPEG o PNG (una scansione), al massimo 20 MB. Il contenuto deve
+         *     corrispondere al tipo dichiarato (altrimenti 422 sotto file). Nome del file nella query.
+         *     Un file già presente viene sostituito. If-Match con la versione della fattura: la
+         *     risposta è la fattura con la versione nuova.
+         */
+        put: operations["setInvoiceFile"];
+        post?: never;
+        /**
+         * Eliminazione del PDF di una fattura
+         * @description Permesso: invoices.update. If-Match con la versione della fattura. La fattura resta,
+         *     senza file; la risposta è la fattura con la versione nuova. Se non c'è un file, 404.
+         */
+        delete: operations["deleteInvoiceFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invoices/{invoice}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Incassi o pagamenti parziali di una fattura
+         * @description Permesso: invoices.view. Senza permesso risponde 404, non 403. Tutti i pagamenti della
+         *     fattura (acconti, rate), dal più vecchio; niente paginazione.
+         */
+        get: operations["listInvoicePayments"];
+        put?: never;
+        /**
+         * Registrazione di un incasso o di un pagamento, anche parziale
+         * @description Permesso: invoices.update. If-Match con la versione della fattura: la risposta è la
+         *     fattura con la versione nuova. La somma dei pagamenti non può superare amount_due
+         *     (422 sotto amount). Quando la somma arriva ad amount_due la fattura risulta pagata:
+         *     paid_on prende la data dell'ultimo pagamento e la scadenza nello scadenziario si chiude;
+         *     finché non ci arriva, paid_on è null e la scadenza resta aperta con l'importo residuo.
+         *     Le note di credito della fattura abbassano quanto si può pagare. Su una nota di
+         *     rimborso (refund true) registra un rimborso, fatto al cliente o ricevuto dal fornitore,
+         *     entro refund_due_amount (422 sotto amount): conta col segno meno in paid_amount e nella
+         *     prima nota. Su una nota di credito che non è di rimborso risponde 409 con code
+         *     credit_note.
+         */
+        post: operations["createInvoicePayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invoices/{invoice}/payments/{payment}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+                payment: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Eliminazione di un pagamento registrato per errore
+         * @description Permesso: invoices.update. If-Match con la versione della fattura: la risposta è la
+         *     fattura con la versione nuova, con paid_on ricalcolato dai pagamenti rimasti (null se
+         *     non ne resta nessuno). Un pagamento si elimina e si registra di nuovo: non si modifica.
+         *     Su una nota di rimborso elimina un rimborso. Una fattura con note di rimborso deve
+         *     restare pagata almeno per il loro totale: altrimenti risponde 409 con code
+         *     has_documents.
+         */
+        delete: operations["deleteInvoicePayment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invoice-payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Incassi e pagamenti registrati di tutte le fatture (prima nota)
+         * @description Permesso: invoices.view. Dal più recente. Filtri sulla data del pagamento
+         *     (filter[from], filter[to]), sul tipo di fattura (filter[direction]: issued per gli
+         *     incassi, received per i pagamenti), sul cantiere della fattura (filter[site]), sul
+         *     cliente o sul fornitore della fattura (filter[client], filter[supplier]; uno di un'altra
+         *     azienda dà un elenco vuoto), sulla modalità (filter[method]) e sul testo (filter[q]: nel
+         *     numero della fattura e nelle note del pagamento, senza distinguere maiuscole e
+         *     minuscole, e nel CIG e nel CUP del cantiere della fattura, anche in parte o con gli
+         *     spazi). collected e paid sono le somme di incassi e pagamenti che
+         *     rispettano i filtri, non solo della pagina. Le fatture segnate pagate senza pagamenti
+         *     registrati non compaiono. I rimborsi registrati sulle note di credito compaiono col
+         *     segno meno, tra gli incassi (emesse) o i pagamenti (ricevute).
+         */
+        get: operations["listPayments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/invoice-payments/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione della prima nota in CSV
+         * @description Permesso: invoices.view. Stessi filtri e ordinamento di listPayments, senza
+         *     paginazione, nello stesso formato dell'esportazione dei clienti. Date come 30/11/2026,
+         *     importi con la virgola decimale (1234,50). Il file si chiama incassi-e-pagamenti.csv.
+         *     Nella colonna Tipo: Incasso, Pagamento, Rimborso fatto (a un cliente) o Rimborso
+         *     ricevuto (da un fornitore), con l'importo dei rimborsi col segno meno.
+         *     Le ultime colonne sono CIG e CUP del cantiere della fattura, vuote se mancano.
+         */
+        get: operations["exportPayments"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2336,11 +5839,43 @@ export interface paths {
         /**
          * Registro delle modifiche
          * @description Permesso: audit.view. Chi ha creato, modificato o eliminato clienti, fornitori,
-         *     scadenze, computi e preventivi, e quando; dal più recente. Di una modifica si danno i
-         *     nomi dei campi cambiati, non i valori. Con filter[entity] e filter[entity_id] si ha
-         *     la storia di un solo documento.
+         *     scadenze, computi, preventivi, cantieri e gli altri documenti di AuditEntity (anche SAL,
+         *     prezzari, attività del cronoprogramma e assenze dei dipendenti), e quando; dal più recente. Di una modifica si
+         *     danno i nomi dei campi cambiati, non i valori. Con filter[entity] e filter[entity_id] si ha
+         *     la storia di un solo documento; con filter[action]=delete, chi ha eliminato cosa; con
+         *     filter[field]=budget, chi ha cambiato il budget.
+         *     filter[from] e filter[to] sono giorni compresi, contati sull'ora italiana.
          */
         get: operations["listAuditLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/audit-log/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione del registro delle modifiche in CSV
+         * @description Permesso: audit.view. Stessi filtri e stesso ordine dell'elenco (dal più recente), senza
+         *     paginazione, nello stesso formato delle altre esportazioni: ad esempio con
+         *     filter[from] e filter[to], le modifiche di un mese. Colonne: Data e ora (all'italiana,
+         *     ora italiana: 30/11/2026 14:05), Utente (vuoto se la modifica non è passata dall'API),
+         *     Documento (il tipo in italiano: Cliente, Cantiere…), Id del documento, Azione
+         *     (Creazione, Modifica o Eliminazione) e Campi (i nomi dei campi cambiati, separati da
+         *     virgola). Il file si chiama registro-modifiche.csv.
+         */
+        get: operations["exportAuditLog"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2472,10 +6007,14 @@ export interface paths {
         /**
          * Invito di una persona con un ruolo
          * @description Permesso: users.manage. Il link è /invito/{token}, vale 7 giorni e una volta sola.
-         *     Il backend lo manda per email all'invitato; il token compare anche in questa risposta
-         *     (e solo qui: il backend ne tiene l'impronta), così il link si può copiare e girare. Un nuovo
-         *     invito per la stessa email sostituisce quello in attesa. Se l'email è già di un
-         *     membro dell'azienda la risposta è 409 con code already_member.
+         *     Il backend lo manda solo per email all'invitato e non lo restituisce mai a chi invita,
+         *     né qui né altrove (ne tiene solo l'impronta): chi accetta l'invito ha quindi letto
+         *     quella casella, e l'account che nasce ha un'email verificata. Il link non si può
+         *     copiare dall'applicazione; se l'email non arriva si rifà l'invito. Un nuovo invito
+         *     per la stessa email sostituisce quello in attesa e il link precedente smette di
+         *     funzionare. Se l'email è già di un membro dell'azienda la risposta è 409 con code
+         *     already_member. Se il messaggio d'invito non parte, la risposta è 503 con code
+         *     email_not_sent e l'invito non viene creato (quello in attesa, se c'è, resta valido).
          */
         post: operations["createInvitation"];
         delete?: never;
@@ -2523,8 +6062,36 @@ export interface paths {
          * @description Non serve la sessione. Un token sconosciuto, già usato o scaduto risponde 404, sempre
          *     con lo stesso messaggio. account_exists dice se l'email ha già un account: in quel
          *     caso la pagina chiede solo la password, altrimenti anche il nome.
+         *     Un link che non funziona (404) conta come tentativo fallito per l'indirizzo IP: dopo
+         *     20 in 15 minuti la risposta è 429 con Retry-After, anche per un link valido. Il
+         *     limite è comune ai link di password dimenticata, invito e cambio email.
          */
         get: operations["getInvitation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/invitations/{token}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["InvitationToken"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Logo dell'azienda che invita, per la pagina /invito/:token
+         * @description Non serve la sessione: basta un invito valido. Risponde 404 se il token è sconosciuto,
+         *     già usato o scaduto, o se l'azienda non ha un logo (has_logo nell'invito lo dice prima:
+         *     senza logo non si chiama). Ogni 404 conta nel limite sui link per indirizzo IP, come
+         *     in getInvitation, e dopo troppi la risposta è 429 con Retry-After.
+         */
+        get: operations["getInvitationLogo"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2551,7 +6118,9 @@ export interface paths {
          *     sua password (name è ignorato). Se va a buon fine l'utente entra nell'azienda con il
          *     ruolo dell'invito e il backend apre una sessione nuova, come all'accesso. Una
          *     password sbagliata risponde 422 sul campo password e conta come tentativo di accesso
-         *     fallito. Un utente già membro riceve 409 con code already_member.
+         *     fallito (dopo troppi, 429). Un utente già membro riceve 409 con code already_member.
+         *     Un invito sconosciuto, già usato o scaduto risponde 404 e conta nel limite sui link
+         *     per indirizzo IP, come in getInvitation: dopo troppi, 429 con Retry-After.
          */
         post: operations["acceptInvitation"];
         delete?: never;
@@ -2726,6 +6295,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/quotes/{quote}/site": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cantiere da un preventivo accettato
+         * @description Permessi: quotes.view e sites.create. Crea il cantiere del lavoro di un preventivo
+         *     accettato: nome dall'oggetto, stesso cliente, budget uguale all'imponibile, stato
+         *     planned, senza codice, indirizzo e date (si completano con updateSite). Il cantiere
+         *     resta collegato al preventivo (quote nel cantiere, site_id nel preventivo); per ogni
+         *     preventivo si crea un solo cantiere. Senza permesso di vedere il preventivo risponde 404.
+         */
+        post: operations["createSiteFromQuote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/quotes/{quote}/revisions": {
         parameters: {
             query?: never;
@@ -2754,6 +6351,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company}/quotes/{quote}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copia di un preventivo, anche per un altro cliente
+         * @description Permessi: quotes.view e quotes.create. Crea una bozza nuova con oggetto, validità, note,
+         *     condizioni e una copia di tutte le righe, in qualunque stato sia il preventivo di
+         *     partenza, che non cambia. A differenza della revisione la copia non è collegata al
+         *     preventivo di partenza né al suo cantiere e al primo invio prende un numero nuovo. Con
+         *     `client_id` la copia va a un altro cliente dell'azienda (422 sotto `client_id` se non
+         *     si trova); con null resta lo stesso cliente. Senza permesso di vedere il preventivo
+         *     risponde 404.
+         */
+        post: operations["duplicateQuote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company}/quotes/{quote}/lines": {
         parameters: {
             query?: never;
@@ -2770,12 +6397,49 @@ export interface paths {
          * @description Permesso: quotes.view. Tutte le righe, in ordine, senza paginazione.
          */
         get: operations["listQuoteLines"];
-        put?: never;
+        /**
+         * Riordino delle righe, in blocco
+         * @description Permesso: quotes.update. Solo in bozza. Si inviano gli id di tutte le righe del
+         *     preventivo, ognuna una volta sola, nel nuovo ordine: la posizione è quella nell'elenco.
+         *     Testi, prezzi, totali e versioni delle righe non cambiano. Se nel frattempo una riga è
+         *     stata aggiunta o eliminata l'elenco non torna più e la risposta è 422 su lines: si
+         *     ricarica la pagina. Per mettere una riga nuova a metà si crea in fondo e poi si riordina.
+         */
+        put: operations["arrangeQuoteLines"];
         /**
          * Nuova riga, in fondo al preventivo
          * @description Permesso: quotes.update. Solo in bozza.
          */
         post: operations["createQuoteLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company}/quotes/{quote}/lines/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Esportazione delle righe di un preventivo in CSV
+         * @description Permesso: quotes.view. Senza permesso risponde 404. Tutte le righe, nell'ordine del
+         *     preventivo, in qualunque stato, nello stesso formato delle altre esportazioni. Colonne:
+         *     Tipo (Voce, Testo o Sezione), Descrizione, Unità, Quantità, Prezzo, Sconto %, Imponibile,
+         *     IVA % e Natura IVA; numeri con la virgola decimale (1234,50), vuoti per testi e sezioni.
+         *     Senza totali, che sono in getQuote e nel PDF. Il file si chiama come il PDF:
+         *     preventivo-<numero>.csv (la barra del numero diventa un trattino), o preventivo-bozza.csv.
+         */
+        get: operations["exportQuoteLines"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2821,8 +6485,12 @@ export interface components {
          */
         Id: string;
         /**
-         * @description Non cambia dopo la creazione. Sono riservati i nomi delle rotte fisse del frontend
-         *     (accedi, profilo, password-dimenticata, invito).
+         * @description Non cambia dopo la creazione. Sono riservati, perché stanno sullo stesso dominio
+         *     accanto a /{slug}/: le rotte fisse del frontend (accedi, esci, profilo,
+         *     password-dimenticata, invito, conferma-email), le API (api) e i file della build
+         *     (assets). Oggi le aziende si creano solo dal backend; un'operazione che crea o cambia
+         *     uno slug risponderà a uno slug riservato con 422 sul campo slug, come agli altri
+         *     errori di validazione.
          * @example impresa-rossi
          */
         Slug: string;
@@ -2831,8 +6499,11 @@ export interface components {
             message: string;
             /**
              * @description Codice stabile per i casi che il frontend deve riconoscere senza leggere il testo.
-             *     Per ora: csrf_invalid, stale_record, precondition_required, has_documents,
-             *     statement_draft_exists, statement_not_draft.
+             *     Tutti quelli in uso: already_member, credit_note, csrf_invalid, current_session,
+             *     database_unavailable, email_in_use, email_not_sent, estimate_final, has_documents, invalid_transition, last_manager,
+             *     number_in_use, order_not_draft, precondition_required, quote_not_draft,
+             *     report_not_draft, role_in_use, self_deactivation, site_exists, stale_record,
+             *     statement_draft_exists, statement_not_draft, storage_full.
              */
             code?: string;
         };
@@ -2870,6 +6541,12 @@ export interface components {
             /** Format: password */
             new_password: string;
         };
+        EmailChangeInput: {
+            /** Format: email */
+            new_email: string;
+            /** Format: password */
+            current_password: string;
+        };
         PasswordResetRequestInput: {
             /** Format: email */
             email: string;
@@ -2888,6 +6565,8 @@ export interface components {
         };
         Membership: {
             slug: components["schemas"]["Slug"];
+            /** @description L'azienda ha un logo, che si legge da getCompanyLogo. */
+            has_logo: boolean;
             /** @example Impresa Rossi S.r.l. */
             name: string;
             /**
@@ -2927,6 +6606,19 @@ export interface components {
             /** Format: date-time */
             joined_at: string;
         };
+        MySession: {
+            id: components["schemas"]["Id"];
+            user_agent: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at: string;
+            /** @description true per la sessione da cui arriva la richiesta. */
+            current: boolean;
+        };
+        MySessionList: {
+            data: components["schemas"]["MySession"][];
+        };
         CompanyUserList: {
             data: components["schemas"]["CompanyUser"][];
         };
@@ -2953,15 +6645,13 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
-        InvitationCreated: components["schemas"]["Invitation"] & {
-            /** @description Da mettere nel link /invito/{token}. Non si può più rileggere. */
-            token: string;
-        };
         InvitationList: {
             data: components["schemas"]["Invitation"][];
         };
         InvitationPreview: {
             company_name: string;
+            /** @description L'azienda ha un logo, che si legge da getInvitationLogo. */
+            has_logo: boolean;
             /** Format: email */
             email: string;
             role_name: string;
@@ -2979,7 +6669,7 @@ export interface components {
          * @description Nella forma <area>.<azione>. L'elenco cresce con i moduli.
          * @enum {string}
          */
-        Permission: "clients.view" | "clients.create" | "clients.update" | "clients.delete" | "suppliers.view" | "suppliers.create" | "suppliers.update" | "suppliers.delete" | "deadlines.view" | "deadlines.create" | "deadlines.update" | "deadlines.delete" | "estimates.view" | "estimates.create" | "estimates.update" | "estimates.delete" | "estimates.approve" | "sites.view" | "sites.create" | "sites.update" | "sites.delete" | "employees.view" | "employees.create" | "employees.update" | "employees.delete" | "vehicles.view" | "vehicles.create" | "vehicles.update" | "vehicles.delete" | "reports.view" | "reports.create" | "reports.update" | "reports.delete" | "reports.approve" | "costs.view" | "costs.create" | "costs.update" | "costs.delete" | "documents.view" | "documents.create" | "documents.update" | "documents.delete" | "price_lists.view" | "price_lists.create" | "price_lists.update" | "price_lists.delete" | "purchases.view" | "purchases.create" | "purchases.update" | "purchases.delete" | "warehouse.view" | "warehouse.create" | "warehouse.update" | "warehouse.delete" | "quotes.view" | "quotes.create" | "quotes.update" | "quotes.delete" | "settings.view" | "settings.update" | "users.view" | "users.manage" | "roles.manage" | "audit.view";
+        Permission: "clients.view" | "clients.create" | "clients.update" | "clients.delete" | "suppliers.view" | "suppliers.create" | "suppliers.update" | "suppliers.delete" | "deadlines.view" | "deadlines.create" | "deadlines.update" | "deadlines.delete" | "estimates.view" | "estimates.create" | "estimates.update" | "estimates.delete" | "estimates.approve" | "sites.view" | "sites.create" | "sites.update" | "sites.delete" | "employees.view" | "employees.create" | "employees.update" | "employees.delete" | "vehicles.view" | "vehicles.create" | "vehicles.update" | "vehicles.delete" | "reports.view" | "reports.create" | "reports.update" | "reports.delete" | "reports.approve" | "costs.view" | "costs.create" | "costs.update" | "costs.delete" | "documents.view" | "documents.create" | "documents.update" | "documents.delete" | "price_lists.view" | "price_lists.create" | "price_lists.update" | "price_lists.delete" | "purchases.view" | "purchases.create" | "purchases.update" | "purchases.delete" | "warehouse.view" | "warehouse.create" | "warehouse.update" | "warehouse.delete" | "invoices.view" | "invoices.create" | "invoices.update" | "invoices.delete" | "quotes.view" | "quotes.create" | "quotes.update" | "quotes.delete" | "settings.view" | "settings.update" | "users.view" | "users.manage" | "roles.manage" | "audit.view";
         /**
          * @description company: impresa, condominio o associazione. person: privato. public_body: ente pubblico.
          * @enum {string}
@@ -3041,9 +6731,23 @@ export interface components {
          *     quote: preventivo. site: cantiere. employee: dipendente. vehicle: mezzo.
          *     daily_report: rapportino. site_cost: costo. site_document: documento o foto del cantiere.
          *     purchase_order: ordine a un fornitore. warehouse_item: articolo di magazzino.
+         *     invoice: fattura. progress_statement: SAL. price_list: prezzario.
+         *     site_activity: attività del cronoprogramma. employee_absence: assenza di un dipendente.
+         *     vehicle_maintenance: manutenzione di un mezzo. vehicle_refueling: rifornimento di un mezzo.
+         *     vehicle_document: documento di un mezzo (assicurazione, bollo...).
+         *     employee_document: documento di un dipendente (idoneità, attestati dei corsi...).
+         *     invoice_payment: pagamento, incasso o rimborso registrato su una fattura.
+         *     supplier_document: documento di un fornitore (DURC, visura...).
+         *     warehouse_movement: carico o scarico di magazzino (anche inventario e resi).
+         *     role: ruolo (nome e permessi; i permessi cambiati compaiono come campo permissions).
+         *     user: utente dell'azienda, con entity_id uguale all'id dell'utente di …/users/{user}
+         *     (creazione all'accettazione dell'invito, modifica di role_id o disabled_at).
+         *     invitation: invito a entrare nell'azienda (l'accettazione è una modifica di accepted_at).
+         *     company_profile: dati dell'azienda di …/settings/company, con entity_id uguale all'id
+         *     dell'azienda.
          * @enum {string}
          */
-        AuditEntity: "client" | "supplier" | "deadline" | "estimate" | "quote" | "site" | "employee" | "vehicle" | "daily_report" | "site_cost" | "site_document" | "purchase_order" | "warehouse_item";
+        AuditEntity: "client" | "supplier" | "deadline" | "estimate" | "quote" | "site" | "employee" | "vehicle" | "daily_report" | "site_cost" | "site_document" | "purchase_order" | "warehouse_item" | "invoice" | "progress_statement" | "price_list" | "site_activity" | "employee_absence" | "vehicle_maintenance" | "vehicle_refueling" | "vehicle_document" | "employee_document" | "invoice_payment" | "supplier_document" | "warehouse_movement" | "role" | "user" | "invitation" | "company_profile";
         AuditEntry: {
             /** @description Progressivo del registro, come testo. */
             id: string;
@@ -3057,8 +6761,15 @@ export interface components {
             /**
              * @description Per update, i nomi dei campi cambiati, in ordine alfabetico. Sono i nomi delle
              *     colonne del database, quasi sempre uguali ai campi del contratto (name, status,
-             *     client_id…); gli importi hanno il suffisso _cents (amount_cents). Vuoto per create
-             *     e delete.
+             *     client_id…); gli importi hanno il suffisso _cents (amount_cents). Fanno eccezione
+             *     permissions per un ruolo (permessi cambiati), team per un cantiere (dipendenti
+             *     aggiunti o tolti dalla squadra), lines per un preventivo, un ordine al fornitore
+             *     o un SAL (righe), items per un prezzario (voci), structure per un computo
+             *     (capitoli, voci e misure), labor e vehicles per un rapportino (ore dei dipendenti
+             *     e dei mezzi), dependencies per un'attività del cronoprogramma (attività da cui
+             *     dipende), file per una fattura o un documento di fornitore, mezzo o dipendente
+             *     (file allegato caricato, sostituito o tolto) e logo per i dati dell'azienda.
+             *     Vuoto per create e delete.
              */
             fields: string[];
             /** @description Chi ha fatto la modifica; null se non è passata dall'API. */
@@ -3141,10 +6852,12 @@ export interface components {
         };
         /**
          * @description durc: DURC. chamber_extract: visura camerale. insurance: polizza assicurativa (RCT/RCO).
+         *     credit_license: patente a crediti per i cantieri (codice della patente nella
+         *     descrizione o nelle note; la data di scadenza solo se c'è).
          *     other: altro documento (descrizione obbligatoria).
          * @enum {string}
          */
-        SupplierDocumentKind: "durc" | "chamber_extract" | "insurance" | "other";
+        SupplierDocumentKind: "durc" | "chamber_extract" | "insurance" | "credit_license" | "other";
         /**
          * Format: date
          * @description Data senza ora, AAAA-MM-GG.
@@ -3164,6 +6877,8 @@ export interface components {
         SupplierDocument: components["schemas"]["SupplierDocumentInput"] & {
             id: components["schemas"]["Id"];
             supplier_id: components["schemas"]["Id"];
+            /** @description Il file allegato (PDF del DURC, scansione della polizza), o null. */
+            file: components["schemas"]["AttachedFile"] | null;
             /**
              * @description Calcolato dal backend sulla data di oggi (ora italiana). valid: valido.
              *     expiring: scade entro 30 giorni. expired: scaduto. no_expiry: senza scadenza.
@@ -3174,6 +6889,421 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        AttachedFile: {
+            file_name: string;
+            /** @enum {string} */
+            content_type: "application/pdf" | "image/jpeg" | "image/png";
+            /** @description Dimensione in byte. */
+            size: number;
+            /** Format: date-time */
+            uploaded_at: string;
+        };
+        /**
+         * @description vacation: ferie. sick_leave: malattia. leave: permesso. injury: infortunio.
+         *     other: altra assenza (note obbligatorie).
+         * @enum {string}
+         */
+        EmployeeAbsenceKind: "vacation" | "sick_leave" | "leave" | "injury" | "other";
+        /**
+         * @description medical_check: giudizio di idoneità alla mansione del medico competente.
+         *     safety_training: attestato di formazione sulla sicurezza (lavoratori, preposti).
+         *     first_aid: addetto al primo soccorso. fire_safety: addetto antincendio. license:
+         *     patentino o abilitazione (gru, piattaforme, ponteggi, macchine movimento terra).
+         *     other: altro documento (descrizione obbligatoria).
+         * @enum {string}
+         */
+        EmployeeDocumentKind: "medical_check" | "safety_training" | "first_aid" | "fire_safety" | "license" | "other";
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        EmployeeDocumentInput: {
+            kind: components["schemas"]["EmployeeDocumentKind"];
+            /** @description Obbligatoria se kind è other (es. nome del corso, ente). */
+            description: string | null;
+            issued_on: components["schemas"]["Date"] | null;
+            /**
+             * @description Non prima di issued_on. Null se il documento non scade. Il backend ne fa una
+             *     scadenza del dipendente e la tiene allineata (una data nuova la riapre).
+             */
+            expires_on: components["schemas"]["Date"] | null;
+            notes: string | null;
+        };
+        EmployeeDocument: components["schemas"]["EmployeeDocumentInput"] & {
+            id: components["schemas"]["Id"];
+            employee_id: components["schemas"]["Id"];
+            /** @description Il file allegato (l'attestato o il giudizio di idoneità), o null. */
+            file: components["schemas"]["AttachedFile"] | null;
+            /**
+             * @description Calcolato dal backend sulla data di oggi (ora italiana). valid: valido.
+             *     expiring: scade entro 30 giorni. expired: scaduto. no_expiry: senza scadenza.
+             * @enum {string}
+             */
+            status: "valid" | "expiring" | "expired" | "no_expiry";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        EmployeeDocumentList: {
+            data: components["schemas"]["EmployeeDocument"][];
+        };
+        /**
+         * @description insurance: assicurazione RCA. road_tax: bollo. registration: carta di circolazione.
+         *     tachograph: taratura del tachigrafo. other: altro documento (descrizione obbligatoria).
+         * @enum {string}
+         */
+        VehicleDocumentKind: "insurance" | "road_tax" | "registration" | "tachograph" | "other";
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        VehicleDocumentInput: {
+            kind: components["schemas"]["VehicleDocumentKind"];
+            /** @description Obbligatoria se kind è other (es. numero di polizza, compagnia). */
+            description: string | null;
+            issued_on: components["schemas"]["Date"] | null;
+            /**
+             * @description Non prima di issued_on. Null se il documento non scade. Il backend ne fa una
+             *     scadenza del mezzo e la tiene allineata (una data nuova la riapre).
+             */
+            expires_on: components["schemas"]["Date"] | null;
+            notes: string | null;
+        };
+        VehicleDocument: components["schemas"]["VehicleDocumentInput"] & {
+            id: components["schemas"]["Id"];
+            vehicle_id: components["schemas"]["Id"];
+            /** @description Il file allegato (scansione della polizza o del libretto), o null. */
+            file: components["schemas"]["AttachedFile"] | null;
+            /**
+             * @description Calcolato dal backend sulla data di oggi (ora italiana). valid: valido.
+             *     expiring: scade entro 30 giorni. expired: scaduto. no_expiry: senza scadenza.
+             * @enum {string}
+             */
+            status: "valid" | "expiring" | "expired" | "no_expiry";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        VehicleDocumentList: {
+            data: components["schemas"]["VehicleDocument"][];
+        };
+        /**
+         * @description service = tagliando, repair = riparazione, inspection = revisione, tires = gomme,
+         *     other = altro.
+         * @enum {string}
+         */
+        VehicleMaintenanceKind: "service" | "repair" | "inspection" | "tires" | "other";
+        /**
+         * @description I campi facoltativi si inviano comunque, con null se vuoti; fa eccezione `next_due_on`,
+         *     che se manca vale null alla creazione e resta com'era nella modifica.
+         */
+        VehicleMaintenanceInput: {
+            performed_on: components["schemas"]["Date"];
+            kind: components["schemas"]["VehicleMaintenanceKind"];
+            description: string;
+            /** @description Officina o fornitore che ha fatto il lavoro, dell'azienda. */
+            supplier_id: components["schemas"]["Id"] | null;
+            /** @description Spesa senza IVA, non negativa; null se non ancora nota. */
+            amount: components["schemas"]["Amount"] | null;
+            /** @description Chilometri o ore motore segnati al momento della manutenzione. */
+            meter_reading: number | null;
+            notes: string | null;
+            /**
+             * @description Data della prossima manutenzione (es. il prossimo tagliando o la prossima
+             *     revisione), dopo `performed_on`. Il backend ne fa una scadenza del mezzo (tipo
+             *     `vehicle`, `vehicle_maintenance_id` nella scadenza), la tiene allineata alla data
+             *     (una data nuova la riapre) e la elimina quando la data si toglie o la manutenzione
+             *     si elimina. Un mezzo con scadenze non si elimina (409 `has_documents`).
+             */
+            next_due_on?: components["schemas"]["Date"] | null;
+        };
+        VehicleMaintenance: components["schemas"]["VehicleMaintenanceInput"] & {
+            id: components["schemas"]["Id"];
+            vehicle_id: components["schemas"]["Id"];
+            supplier: components["schemas"]["SubjectRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        VehicleMaintenanceList: {
+            data: components["schemas"]["VehicleMaintenance"][];
+            /** @description Somma delle spese dell'elenco (quelle senza importo contano zero). */
+            total_amount: components["schemas"]["SignedAmount"];
+        };
+        CompanyVehicleMaintenanceList: {
+            data: (components["schemas"]["VehicleMaintenance"] & {
+                vehicle: {
+                    id: components["schemas"]["Id"];
+                    name: string;
+                    plate: string | null;
+                };
+            })[];
+            meta: components["schemas"]["ListMeta"];
+            /** @description Somma delle spese di tutte le manutenzioni filtrate, non solo della pagina. */
+            total_amount: components["schemas"]["SignedAmount"];
+        };
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        VehicleRefuelingInput: {
+            refueled_on: components["schemas"]["Date"];
+            liters: components["schemas"]["Liters"];
+            /** @description Spesa del rifornimento senza IVA, non negativa. */
+            amount: components["schemas"]["Amount"];
+            /** @description Chilometri o ore motore segnati al momento del rifornimento. */
+            meter_reading: number | null;
+            /** @description Distributore o fornitore del carburante, dell'azienda. */
+            supplier_id: components["schemas"]["Id"] | null;
+            notes: string | null;
+        };
+        VehicleRefueling: components["schemas"]["VehicleRefuelingInput"] & {
+            id: components["schemas"]["Id"];
+            vehicle_id: components["schemas"]["Id"];
+            /**
+             * @description Consumo da pieno a pieno: litri di questo rifornimento divisi per i chilometri o
+             *     le ore dal rifornimento precedente, cioè quello del mezzo con la lettura più alta
+             *     tra quelle più basse di questa (di qualunque data, anche fuori dal periodo
+             *     filtrato). Per gli automezzi in litri ogni 100 km, per macchine operatrici e
+             *     attrezzature in litri all'ora, con due decimali e il punto. null senza
+             *     contachilometri o senza un rifornimento precedente con una lettura più bassa.
+             *     Solo lettura, da non inviare: cambia senza cambiare l'ETag quando si registra,
+             *     si modifica o si elimina un altro rifornimento.
+             * @example 8.75
+             */
+            consumption: string | null;
+            supplier: components["schemas"]["SubjectRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        VehicleRefuelingList: {
+            data: components["schemas"]["VehicleRefueling"][];
+            /**
+             * @description Somma dei litri dell'elenco, con due decimali e il punto.
+             * @example 1234.50
+             */
+            total_liters: string;
+            /** @description Somma delle spese dell'elenco. */
+            total_amount: components["schemas"]["SignedAmount"];
+        };
+        CompanyVehicleRefuelingList: {
+            data: (components["schemas"]["VehicleRefueling"] & {
+                vehicle: {
+                    id: components["schemas"]["Id"];
+                    name: string;
+                    plate: string | null;
+                };
+            })[];
+            meta: components["schemas"]["ListMeta"];
+            /**
+             * @description Somma dei litri di tutti i rifornimenti filtrati, con due decimali e il punto.
+             * @example 1234.50
+             */
+            total_liters: string;
+            /** @description Somma delle spese di tutti i rifornimenti filtrati, non solo della pagina. */
+            total_amount: components["schemas"]["SignedAmount"];
+        };
+        /**
+         * @description Litri come stringa con il punto e fino a due decimali, mai numero JSON; più di zero. In
+         *     uscita ha sempre due decimali.
+         * @example 45.20
+         */
+        Liters: string;
+        /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        EmployeeAbsenceInput: {
+            kind: components["schemas"]["EmployeeAbsenceKind"];
+            starts_on: components["schemas"]["Date"];
+            /** @description Ultimo giorno di assenza, compreso; non prima di starts_on. */
+            ends_on: components["schemas"]["Date"];
+            /**
+             * @description Solo per un'assenza di parte della giornata (es. permesso di 2 ore): ammesse solo se
+             *     starts_on ed ends_on coincidono, da 0.01 a 24. Null per giornate intere.
+             */
+            hours: components["schemas"]["Hours"] | null;
+            /** @description Obbligatorie se kind è other. */
+            notes: string | null;
+        };
+        EmployeeAbsence: components["schemas"]["EmployeeAbsenceInput"] & {
+            id: components["schemas"]["Id"];
+            employee_id: components["schemas"]["Id"];
+            /** @description Giorni di calendario da starts_on a ends_on, estremi compresi. */
+            days: number;
+            /**
+             * @description Giorni lavorativi da starts_on a ends_on, estremi compresi: dal lunedì al venerdì,
+             *     senza le festività nazionali (1° e 6 gennaio, lunedì dell'Angelo, 25 aprile,
+             *     1° maggio, 2 giugno, 15 agosto, 1° novembre, 8, 25 e 26 dicembre). Il santo
+             *     patrono si toglie se indicato nei dati dell'azienda (patron_saint_day). null per un'assenza a ore.
+             */
+            working_days: number | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        EmployeeAbsenceList: {
+            data: components["schemas"]["EmployeeAbsence"][];
+        };
+        CompanyAbsenceList: {
+            data: (components["schemas"]["EmployeeAbsence"] & {
+                employee: {
+                    id: components["schemas"]["Id"];
+                    first_name: string;
+                    last_name: string;
+                    active: boolean;
+                };
+            })[];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description Almeno uno dei due campi. Un campo che manca resta com'era (null se il riporto è
+         *     nuovo), null lo toglie; senza giorni e senza ore il riporto non resta (422: si elimina).
+         */
+        LeaveCarryoverInput: {
+            /**
+             * @description Giorni lavorativi di ferie non godute riportati dall'anno prima; negativo se il
+             *     dipendente ne ha anticipate.
+             */
+            days?: number | null;
+            /**
+             * @description Ore di permesso (permessi retribuiti, ROL, ex festività) non godute riportate
+             *     dall'anno prima, da -2000 a 2000 con il punto; negativo se ne ha anticipate.
+             * @example 12.5
+             * @example -4
+             */
+            permit_hours?: string | null;
+        };
+        LeaveCarryover: {
+            year: number;
+            /** @description Giorni riportati, come in LeaveCarryoverInput; null se non indicati. */
+            days: number | null;
+            /**
+             * @description Ore di permesso riportate, con due decimali; null se non indicate.
+             * @example 12.50
+             */
+            permit_hours: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LeaveCarryoverList: {
+            data: components["schemas"]["LeaveCarryover"][];
+        };
+        AbsenceYearClosingInput: {
+            /** @description Anno da chiudere; i riporti vanno nell'anno dopo. */
+            year: number;
+        };
+        AbsenceYearClosing: {
+            year: number;
+            /** @description Anno dei riporti scritti, year + 1. */
+            carried_into: number;
+            /** @description Un elemento per dipendente toccato, per cognome e nome. */
+            data: {
+                employee: {
+                    id: components["schemas"]["Id"];
+                    first_name: string;
+                    last_name: string;
+                };
+                /** @description Giorni di ferie del riporto dopo la chiusura, come in LeaveCarryover. */
+                days: number | null;
+                /**
+                 * @description Ore di permesso del riporto dopo la chiusura, come in LeaveCarryover.
+                 * @example 12.50
+                 */
+                permit_hours: string | null;
+            }[];
+        };
+        /** @description Tutti i tipi, nell'ordine di EmployeeAbsenceKind, anche a zero. */
+        AbsenceTotalsKinds: {
+            kind: components["schemas"]["EmployeeAbsenceKind"];
+            days: number;
+            /** @description Giorni lavorativi delle assenze di tutto il giorno, dentro l'anno. */
+            working_days: number;
+            hours: components["schemas"]["WorkHours"];
+        }[];
+        HolidayList: {
+            year: number;
+            holidays: {
+                date: components["schemas"]["Date"];
+                /** @description Nome in italiano, es. «Capodanno», «Lunedì dell'Angelo», «Santo patrono». */
+                name: string;
+                /** @enum {string} */
+                kind: "national" | "patron_saint";
+            }[];
+        };
+        WorkingDays: {
+            from: components["schemas"]["Date"];
+            to: components["schemas"]["Date"];
+            /** @description Giorni di calendario del periodo, from e to compresi. */
+            days: number;
+            /** @description Giorni da lunedì a venerdì del periodo, senza festività e santo patrono. */
+            working_days: number;
+            holidays: {
+                date: components["schemas"]["Date"];
+                /** @description Nome in italiano, come in listHolidays. */
+                name: string;
+                /** @enum {string} */
+                kind: "national" | "patron_saint";
+            }[];
+        };
+        WorkingDaysEnd: {
+            from: components["schemas"]["Date"];
+            /** @description I giorni lavorativi chiesti. */
+            working_days: number;
+            to: components["schemas"]["Date"];
+            /** @description Giorni di calendario da from a to, entrambi compresi. */
+            days: number;
+        };
+        WorkingDaysStart: {
+            from: components["schemas"]["Date"];
+            /** @description I giorni lavorativi chiesti. */
+            working_days: number;
+            to: components["schemas"]["Date"];
+            /** @description Giorni di calendario da from a to, entrambi compresi. */
+            days: number;
+        };
+        AbsenceTotals: {
+            year: number;
+            from: components["schemas"]["Date"];
+            to: components["schemas"]["Date"];
+            employees: {
+                employee: {
+                    id: components["schemas"]["Id"];
+                    first_name: string;
+                    last_name: string;
+                    active: boolean;
+                };
+                /** @description Giorni di ferie spettanti nell'anno (annual_leave_days), null se non indicati. */
+                vacation_allowance: number | null;
+                /** @description Giorni di ferie riportati dall'anno prima (setLeaveCarryover), null se non indicati. */
+                vacation_carried_over: number | null;
+                /**
+                 * @description Ferie spettanti più quelle riportate dall'anno prima, meno i giorni lavorativi
+                 *     di ferie dell'anno; negativo se ne ha fatte di più, null senza ferie spettanti.
+                 */
+                vacation_remaining: number | null;
+                /** @description Ore di permesso spettanti nell'anno (annual_permit_hours), null se non indicate. */
+                permit_allowance: number | null;
+                /**
+                 * @description Ore di permesso riportate dall'anno prima (setLeaveCarryover), null se non indicate.
+                 * @example 12.50
+                 */
+                permit_carried_over: string | null;
+                /**
+                 * @description Ore di permesso spettanti più quelle riportate dall'anno prima, meno le ore dei
+                 *     permessi dell'anno; un permesso di
+                 *     tutto il giorno conta 8 ore per ogni giorno lavorativo. Negativo se ne ha
+                 *     fatte di più, null senza ore spettanti.
+                 * @example 80.50
+                 * @example -4.00
+                 */
+                permit_remaining: string | null;
+                days: number;
+                working_days: number;
+                hours: components["schemas"]["WorkHours"];
+                kinds: components["schemas"]["AbsenceTotalsKinds"];
+            }[];
+            totals: {
+                days: number;
+                working_days: number;
+                hours: components["schemas"]["WorkHours"];
+                kinds: components["schemas"]["AbsenceTotalsKinds"];
+            };
         };
         SupplierDocumentList: {
             data: components["schemas"]["SupplierDocument"][];
@@ -3194,19 +7324,21 @@ export interface components {
         /**
          * @description durc, insurance (assicurazione), tax (imposte e contributi), invoice_in (fattura da
          *     pagare), invoice_out (fattura da incassare), contract (contratto), vehicle (mezzo:
-         *     bollo, revisione), other.
+         *     bollo, revisione), medical_check (visita medica del dipendente), training (formazione
+         *     e corsi sulla sicurezza), other.
          * @enum {string}
          */
-        DeadlineKind: "durc" | "insurance" | "tax" | "invoice_in" | "invoice_out" | "contract" | "vehicle" | "other";
+        DeadlineKind: "durc" | "insurance" | "tax" | "invoice_in" | "invoice_out" | "contract" | "vehicle" | "medical_check" | "training" | "other";
         /** @enum {string} */
         DeadlineStatus: "open" | "done";
         /**
-         * @description monthly (ogni mese), quarterly (ogni tre mesi), yearly (ogni anno). La data successiva
-         *     si ottiene aggiungendo l'intervallo; a fine mese si ferma all'ultimo giorno (31/01 →
-         *     28/02).
+         * @description monthly (ogni mese), quarterly (ogni tre mesi), semiannual (ogni sei mesi, es.
+         *     controllo degli estintori), yearly (ogni anno), biennial (ogni due anni, es. revisione
+         *     di un mezzo dopo la prima). La data successiva si ottiene aggiungendo l'intervallo; a
+         *     fine mese si ferma all'ultimo giorno (31/01 → 28/02, 31/08 + sei mesi → 28/02).
          * @enum {string}
          */
-        DeadlineRecurrence: "monthly" | "quarterly" | "yearly";
+        DeadlineRecurrence: "monthly" | "quarterly" | "semiannual" | "yearly" | "biennial";
         /** @description Cliente o fornitore collegato, con il nome per mostrarlo senza altre chiamate. */
         SubjectRef: {
             id: components["schemas"]["Id"];
@@ -3214,7 +7346,8 @@ export interface components {
         };
         /**
          * @description I campi facoltativi si inviano comunque, con null se vuoti. Al massimo uno tra
-         *     client_id e supplier_id.
+         *     client_id e supplier_id. site_id, employee_id e vehicle_id si possono omettere: un
+         *     campo assente vale null, anche in modifica (toglie il collegamento).
          */
         DeadlineInput: {
             title: string;
@@ -3223,11 +7356,25 @@ export interface components {
             amount: components["schemas"]["Amount"] | null;
             client_id: components["schemas"]["Id"] | null;
             supplier_id: components["schemas"]["Id"] | null;
+            /** @description Cantiere a cui si riferisce la scadenza (es. un permesso). */
+            site_id?: components["schemas"]["Id"] | null;
+            /** @description Dipendente a cui si riferisce (es. visita medica, corso sulla sicurezza). */
+            employee_id?: components["schemas"]["Id"] | null;
+            /** @description Mezzo a cui si riferisce (es. revisione, bollo, assicurazione). */
+            vehicle_id?: components["schemas"]["Id"] | null;
             notes: string | null;
             recurrence: components["schemas"]["DeadlineRecurrence"] | null;
         };
         Deadline: components["schemas"]["DeadlineInput"] & {
             id: components["schemas"]["Id"];
+            /**
+             * @description Primo giorno lavorativo uguale o successivo a `due_on`: da lunedì a venerdì,
+             *     escluse le festività nazionali con Pasquetta e il santo patrono dell'azienda. Una
+             *     scadenza che cade di sabato o in un giorno festivo slitta qui, come gli adempimenti
+             *     fiscali; coincide con `due_on` se quel giorno è già lavorativo. Lo calcola il
+             *     backend, non si invia.
+             */
+            working_due_on: components["schemas"]["Date"];
             /** @description In uscita sempre con due decimali. */
             amount?: string | null;
             status: components["schemas"]["DeadlineStatus"];
@@ -3237,12 +7384,43 @@ export interface components {
              *     elimina con il documento: si modifica dal documento, non da qui.
              */
             supplier_document_id: components["schemas"]["Id"] | null;
+            /**
+             * @description Fattura da cui nasce la scadenza di pagamento. Il backend la tiene allineata alla
+             *     fattura (data, importo, chiusa quando la fattura è pagata) e la elimina con la
+             *     fattura: si modifica dalla fattura, non da qui.
+             */
+            invoice_id: components["schemas"]["Id"] | null;
+            /**
+             * @description Manutenzione del mezzo da cui nasce la scadenza (la sua `next_due_on`). Il
+             *     backend la tiene allineata alla data della prossima manutenzione (una data nuova
+             *     la riapre) e la elimina con la manutenzione: si modifica dalla manutenzione, non
+             *     da qui.
+             */
+            vehicle_maintenance_id: components["schemas"]["Id"] | null;
+            /**
+             * @description Documento del mezzo da cui nasce la scadenza (assicurazione, bollo...). Il backend
+             *     la tiene allineata alla scadenza del documento (una data nuova la riapre) e la
+             *     elimina con il documento: si modifica dal documento, non da qui.
+             */
+            vehicle_document_id: components["schemas"]["Id"] | null;
+            /**
+             * @description Documento del dipendente da cui nasce la scadenza (idoneità sanitaria, corsi...).
+             *     Il backend la tiene allineata alla scadenza del documento (una data nuova la
+             *     riapre) e la elimina con il documento: si modifica dal documento, non da qui.
+             */
+            employee_document_id: components["schemas"]["Id"] | null;
             /** @description La scadenza creata completando questa, se ricorrente. */
             next_deadline_id: components["schemas"]["Id"] | null;
             /** Format: date-time */
             done_at: string | null;
             client: components["schemas"]["SubjectRef"] | null;
             supplier: components["schemas"]["SubjectRef"] | null;
+            /** @description Cantiere collegato, con il nome. */
+            site: components["schemas"]["SubjectRef"] | null;
+            /** @description Dipendente collegato, con cognome e nome. */
+            employee: components["schemas"]["SubjectRef"] | null;
+            /** @description Mezzo collegato, con il nome. */
+            vehicle: components["schemas"]["SubjectRef"] | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -3284,10 +7462,86 @@ export interface components {
             /** @description Budget di costo del cantiere. */
             budget: components["schemas"]["Amount"] | null;
             notes: string | null;
+            /**
+             * @description Posizione del cantiere sulla mappa (WGS 84, come OpenStreetMap), o null se non
+             *     indicata. Facoltativo: se manca, alla creazione vale null e alla modifica resta
+             *     com'è.
+             */
+            location?: components["schemas"]["GeoPoint"] | null;
+            /**
+             * @description CIG (codice identificativo di gara) dei lavori pubblici: 10 lettere e cifre. Si
+             *     salva in maiuscolo e senza spazi; una stringa vuota vale null. Facoltativo come
+             *     location.
+             * @example 1234567890
+             */
+            cig?: string | null;
+            /**
+             * @description CUP (codice unico di progetto) dei lavori pubblici: 15 lettere e cifre, come il CIG.
+             *     Facoltativo come location.
+             * @example B12C34000560007
+             */
+            cup?: string | null;
+            /**
+             * @description Titolo edilizio dei lavori, in una riga (tipo, numero e data: permesso di
+             *     costruire, SCIA, CILA…), come va sul cartello di cantiere. Una stringa vuota vale
+             *     null. Facoltativo come location.
+             * @example Permesso di costruire n. 45/2026 del 12/03/2026
+             */
+            permit?: string | null;
+            /**
+             * @description Direttore dei lavori (nome, titolo e ordine professionale), in una riga. Facoltativo
+             *     come location.
+             */
+            works_director?: string | null;
+            /**
+             * @description Coordinatore per la sicurezza in fase di esecuzione (CSE), in una riga. Facoltativo
+             *     come location.
+             */
+            safety_coordinator?: string | null;
+            /**
+             * @description Data di invio della notifica preliminare all'ASL e all'Ispettorato del lavoro, o
+             *     null. Facoltativo come location.
+             */
+            prior_notice_on?: components["schemas"]["Date"] | null;
+        };
+        GeoPoint: {
+            /**
+             * @description Latitudine in gradi decimali con il punto, da -90 a 90, fino a sei decimali; mai
+             *     numero JSON. In uscita ha sempre sei decimali.
+             * @example 45.070312
+             */
+            latitude: string;
+            /**
+             * @description Longitudine in gradi decimali, da -180 a 180, come la latitudine.
+             * @example 7.686856
+             */
+            longitude: string;
         };
         Site: components["schemas"]["SiteInput"] & {
             id: components["schemas"]["Id"];
             client: components["schemas"]["SubjectRef"] | null;
+            /**
+             * @description Vero se almeno un dipendente della squadra ha un documento scaduto, come
+             *     documents_expired di getSiteTeam e filter[team_documents]=expired. Calcolato:
+             *     non cambia l'ETag e si ignora se arriva nel corpo.
+             */
+            team_documents_expired: boolean;
+            /**
+             * @description Vero se almeno un subappaltatore del cantiere ha un documento scaduto, come
+             *     listSiteSubcontractors e filter[subcontractor_compliance]=expired. Null senza
+             *     suppliers.view. Calcolato: non cambia l'ETag e si ignora se arriva nel corpo.
+             */
+            subcontractors_expired: boolean | null;
+            /**
+             * @description Data dell'ultimo rapportino del cantiere (in qualunque stato) fino a oggi in
+             *     Italia compreso, o null se non ce ne sono; i rapportini con una data futura non
+             *     contano. Serve a vedere da quanto un cantiere è fermo (filter[without_recent_reports]);
+             *     con sort=last_report_on prima i cantieri senza rapportini, poi dal più vecchio.
+             *     Visibile con sites.view. Calcolato: non cambia l'ETag e si ignora se arriva nel corpo.
+             */
+            last_report_on: components["schemas"]["Date"] | null;
+            /** @description Il preventivo da cui è nato il cantiere (createSiteFromQuote), o null. */
+            quote: components["schemas"]["QuoteRef"] | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -3306,6 +7560,95 @@ export interface components {
             last_name: string;
             job_title: string | null;
             active: boolean;
+            /** @description Assente oggi tutto il giorno (ferie, malattia…, un'assenza senza ore). */
+            away: boolean;
+            /**
+             * @description Tipo dell'assenza di oggi, se c'è, anche un permesso a ore. Solo con
+             *     employees.view, altrimenti null.
+             */
+            absence: components["schemas"]["EmployeeAbsenceKind"] | null;
+            /** @description Ore del permesso di oggi; null per tutto il giorno o senza employees.view. */
+            absence_hours: components["schemas"]["Hours"] | null;
+            /**
+             * @description Ha un documento scaduto (idoneità, attestato di un corso, patentino…), con le stesse
+             *     condizioni di filter[documents]=expired dei dipendenti: un documento rinnovato non
+             *     conta più. Lo vede anche chi non ha employees.view, senza sapere quale documento.
+             */
+            documents_expired: boolean;
+        };
+        SiteSubcontractor: {
+            supplier_id: components["schemas"]["Id"];
+            name: string;
+            vat_number: string | null;
+            /** @description Il fornitore è archiviato. */
+            archived: boolean;
+            /**
+             * @description Per almeno un tipo di documento la scadenza più lontana è passata (come
+             *     filter[compliance]=expired): un documento rinnovato non conta più.
+             */
+            documents_expired: boolean;
+            /** @description Niente di scaduto, ma qualcosa scade entro 30 giorni (filter[compliance]=expiring). */
+            documents_expiring: boolean;
+            /** @description Nessun DURC valido oggi (filter[compliance]=no_valid_durc). */
+            no_valid_durc: boolean;
+            /** @description Nessuna patente a crediti valida oggi (filter[compliance]=no_valid_credit_license). */
+            no_valid_credit_license: boolean;
+        };
+        SiteSubcontractorList: {
+            data: components["schemas"]["SiteSubcontractor"][];
+        };
+        ClientSite: {
+            site_id: components["schemas"]["Id"];
+            code: string | null;
+            name: string;
+            status: components["schemas"]["SiteStatus"];
+            /** @description CIG del cantiere (vedi Site), per i lavori pubblici. */
+            cig: string | null;
+            /** @description CUP del cantiere (vedi Site), per i lavori pubblici. */
+            cup: string | null;
+            /**
+             * @description Imponibile del preventivo da cui è nato il cantiere; null se non è nato da un
+             *     preventivo o senza quotes.view.
+             */
+            quoted: components["schemas"]["Amount"] | null;
+            /** @description Imponibile delle fatture emesse al cliente per il cantiere; null senza invoices.view. */
+            invoiced: components["schemas"]["Amount"] | null;
+            /** @description Incassato su quelle fatture; null senza invoices.view. */
+            collected: components["schemas"]["Amount"] | null;
+            /** @description Resta da incassare su quelle fatture; null senza invoices.view. */
+            to_collect: components["schemas"]["Amount"] | null;
+        };
+        ClientSiteList: {
+            data: components["schemas"]["ClientSite"][];
+        };
+        SupplierSite: {
+            site_id: components["schemas"]["Id"];
+            code: string | null;
+            name: string;
+            status: components["schemas"]["SiteStatus"];
+            /** @description CIG del cantiere (vedi Site), per i lavori pubblici. */
+            cig: string | null;
+            /** @description CUP del cantiere (vedi Site), per i lavori pubblici. */
+            cup: string | null;
+            /** @description Costi inseriti a mano con il fornitore sul cantiere; null senza costs.view. */
+            costs: components["schemas"]["Amount"] | null;
+            /**
+             * @description Totale senza IVA degli ordini inviati o ricevuti al fornitore per il cantiere; null
+             *     senza purchases.view.
+             */
+            orders: components["schemas"]["Amount"] | null;
+        };
+        SupplierSiteList: {
+            data: components["schemas"]["SupplierSite"][];
+        };
+        EmployeeSite: {
+            site_id: components["schemas"]["Id"];
+            code: string | null;
+            name: string;
+            status: components["schemas"]["SiteStatus"];
+        };
+        EmployeeSiteList: {
+            data: components["schemas"]["EmployeeSite"][];
         };
         SiteTeam: {
             data: components["schemas"]["SiteTeamMember"][];
@@ -3322,9 +7665,52 @@ export interface components {
          */
         Hours: string;
         /**
+         * @description Ore lavorate da un dipendente in un rapportino, come stringa con il punto, da 0 a 24; in
+         *     uscita sempre con due decimali. 0 solo per una giornata persa tutta per maltempo, con
+         *     weather_hours maggiore di 0 (altrimenti 422 sotto labor.N.hours): la riga non conta
+         *     come giorno lavorato nei riepiloghi delle ore e nelle ore mensili per cantiere.
+         * @example 8.00
+         * @example 7.5
+         * @example 0
+         */
+        LaborHours: string;
+        /**
+         * @description Ore di straordinario del dipendente in quel giorno, comprese in hours (8 ore con 1
+         *     di straordinario: hours 8, overtime_hours 1): da 0 a hours, con il punto. Facoltativo,
+         *     null o assente vale 0. Servono al consulente del lavoro; i costi restano sulle ore
+         *     (hours) al costo orario del dipendente.
+         * @example 1.5
+         * @example 0
+         */
+        OvertimeHoursInput: string | null;
+        /**
+         * @description Ore di straordinario comprese nelle ore, con due decimali ('0.00' se non ce ne sono).
+         * @example 1.50
+         * @example 0.00
+         */
+        OvertimeHours: string;
+        /**
+         * @description Ore della giornata normale che il dipendente non ha lavorato per maltempo (pioggia, neve,
+         *     gelo), per la cassa integrazione per intemperie: non sono comprese in hours (mandato a
+         *     casa dopo 3 ore per la pioggia: hours 3, weather_hours 5; giornata persa tutta: hours 0,
+         *     weather_hours 8), e hours più weather_hours non supera 24. Da 0 a 24, con il punto. Facoltativo, null o assente vale 0. Non hanno costi.
+         * @example 5
+         * @example 0
+         */
+        WeatherHoursInput: string | null;
+        /**
+         * @description Ore perse per maltempo, non comprese nelle ore, con due decimali ('0.00' se non ce ne
+         *     sono).
+         * @example 5.00
+         * @example 0.00
+         */
+        WeatherHours: string;
+        /**
          * @description I campi facoltativi si inviano comunque, con null se vuoti. labor e vehicles sono gli
          *     elenchi completi (anche vuoti), al massimo 100 righe ciascuno, senza doppioni; gli
-         *     errori delle righe usano il percorso con l'indice (labor.0.hours).
+         *     errori delle righe usano il percorso con l'indice (labor.0.hours). Fa eccezione
+         *     overtime_hours delle righe dei dipendenti: se manca (o è null) vale 0; travel: se
+         *     manca (o è null) vale false; weather_hours: se manca (o è null) vale 0.
          */
         DailyReportInput: {
             site_id: components["schemas"]["Id"];
@@ -3336,7 +7722,15 @@ export interface components {
             notes: string | null;
             labor: {
                 employee_id: components["schemas"]["Id"];
-                hours: components["schemas"]["Hours"];
+                hours: components["schemas"]["LaborHours"];
+                overtime_hours?: components["schemas"]["OvertimeHoursInput"];
+                /**
+                 * @description Il dipendente quel giorno ha lavorato in trasferta, fuori dalla zona abituale:
+                 *     il consulente del lavoro paga l'indennità secondo il contratto (il gestionale
+                 *     segna solo il giorno). Facoltativo, null o assente vale false.
+                 */
+                travel?: boolean | null;
+                weather_hours?: components["schemas"]["WeatherHoursInput"];
                 description: string | null;
             }[];
             vehicles: {
@@ -3363,6 +7757,24 @@ export interface components {
             work_done: string | null;
             notes: string | null;
             total_labor_hours: components["schemas"]["Hours"];
+            /** @description Somma degli straordinari dei dipendenti, compresa in total_labor_hours. */
+            total_overtime_hours: components["schemas"]["OvertimeHours"];
+            /**
+             * @description Somma delle ore perse per maltempo dei dipendenti, fuori da total_labor_hours: un
+             *     giorno di pioggia si riconosce dall'elenco senza aprire il rapportino.
+             */
+            total_weather_hours: components["schemas"]["WeatherHours"];
+            /**
+             * @description Quanti dipendenti del rapportino sono in trasferta (travel) quel giorno: le trasferte
+             *     si vedono dall'elenco senza aprire il rapportino.
+             */
+            travel_count: number;
+            /**
+             * @description Il giorno del rapportino è festivo: domenica, festivo nazionale (Pasquetta compresa) o
+             *     santo patrono dei dati dell'azienda (patron_saint_day). Le stesse giornate delle ore
+             *     festive dei fogli ore mensili, da pagare con la maggiorazione.
+             */
+            holiday: boolean;
             total_vehicle_hours: components["schemas"]["Hours"];
             /** @description Chi ha scritto il rapportino; null per i dati caricati fuori dall'API. */
             created_by: components["schemas"]["UserRef"] | null;
@@ -3382,7 +7794,11 @@ export interface components {
                 employee_id: components["schemas"]["Id"];
                 first_name: string;
                 last_name: string;
-                hours: components["schemas"]["Hours"];
+                hours: components["schemas"]["LaborHours"];
+                overtime_hours: components["schemas"]["OvertimeHours"];
+                /** @description Giorno in trasferta. */
+                travel: boolean;
+                weather_hours: components["schemas"]["WeatherHours"];
                 description: string | null;
             }[];
             /** @description Ore dei mezzi, senza costi. */
@@ -3404,18 +7820,38 @@ export interface components {
             /** @description Il rapportino già scritto per quel giorno, oppure null. */
             report: components["schemas"]["DailyReport"] | null;
             proposal: components["schemas"]["DailyReportInput"];
-            /** @description Dipendenti attivi, per cognome e nome; in_team se sono nella squadra. */
+            /**
+             * @description Dipendenti attivi, per cognome e nome; in_team se sono nella squadra; away se sono
+             *     assenti tutto il giorno (non si possono mettere nel rapportino). Solo con
+             *     employees.view, altrimenti null: absence è il tipo dell'assenza in quel giorno (null
+             *     se non ce n'è), absence_hours le ore di un permesso a ore (null per un'assenza di
+             *     tutto il giorno).
+             */
             employees: {
                 id: components["schemas"]["Id"];
                 first_name: string;
                 last_name: string;
                 in_team: boolean;
+                away: boolean;
+                /**
+                 * @description Vero se in quel giorno è scaduto l'ultimo documento di almeno un tipo (come
+                 *     filter[documents]=expired di listEmployees, ma alla data del rapportino).
+                 */
+                documents_expired: boolean;
+                absence: components["schemas"]["EmployeeAbsenceKind"] | null;
+                absence_hours: components["schemas"]["Hours"] | null;
             }[];
             /** @description Mezzi attivi, per nome. */
             vehicles: {
                 id: components["schemas"]["Id"];
                 name: string;
                 plate: string | null;
+                /**
+                 * @description Vero se in quel giorno è scaduto l'ultimo documento di almeno un tipo
+                 *     (assicurazione, bollo, taratura…), come filter[documents]=expired di
+                 *     listVehicles ma alla data del rapportino.
+                 */
+                documents_expired: boolean;
             }[];
         };
         DailyReportList: {
@@ -3444,6 +7880,10 @@ export interface components {
                 id: components["schemas"]["Id"];
                 name: string;
                 code: string | null;
+                /** @description CIG del cantiere (vedi Site), per i lavori pubblici. */
+                cig: string | null;
+                /** @description CUP del cantiere (vedi Site), per i lavori pubblici. */
+                cup: string | null;
             };
             supplier: components["schemas"]["SubjectRef"] | null;
             /** Format: date-time */
@@ -3494,6 +7934,10 @@ export interface components {
                 id: components["schemas"]["Id"];
                 name: string;
                 code: string | null;
+                /** @description CIG del cantiere (vedi Site), per i lavori pubblici. */
+                cig: string | null;
+                /** @description CUP del cantiere (vedi Site), per i lavori pubblici. */
+                cup: string | null;
             } | null;
             date: components["schemas"]["Date"];
             delivery_date: components["schemas"]["Date"] | null;
@@ -3501,6 +7945,12 @@ export interface components {
             line_count: number;
             /** @description Somma delle righe, senza IVA. */
             total: components["schemas"]["Amount"];
+            /**
+             * @description Imponibile delle fatture ricevute che addebitano l'ordine (purchase_order_id della
+             *     fattura), da confrontare con total; 0.00 se non ce ne sono. Null senza
+             *     invoices.view. Calcolato: non cambia l'ETag e si ignora nel corpo.
+             */
+            invoiced_amount: components["schemas"]["Amount"] | null;
             /** Format: date-time */
             sent_at: string | null;
             /** Format: date-time */
@@ -3518,17 +7968,299 @@ export interface components {
             meta: components["schemas"]["ListMeta"];
             total_amount: components["schemas"]["Amount"];
         };
+        /**
+         * @description issued: emessa a un cliente. received: ricevuta da un fornitore.
+         * @enum {string}
+         */
+        InvoiceDirection: "issued" | "received";
+        /**
+         * @description paid: pagata (o incassata). overdue: non pagata e con la scadenza di pagamento passata
+         *     (oggi in Italia). open: non pagata, non ancora scaduta o senza scadenza.
+         * @enum {string}
+         */
+        InvoicePaymentStatus: "open" | "overdue" | "paid";
+        /**
+         * @description I campi facoltativi si inviano comunque, con null se vuoti. Le emesse hanno client_id
+         *     e supplier_id null, le ricevute il contrario. La scadenza di pagamento non può essere
+         *     prima della data della fattura. Niente invio allo SDI: è solo un registro.
+         */
+        InvoiceInput: {
+            direction: components["schemas"]["InvoiceDirection"];
+            /** @example 12/2026 */
+            number: string;
+            date: components["schemas"]["Date"];
+            client_id: components["schemas"]["Id"] | null;
+            supplier_id: components["schemas"]["Id"] | null;
+            site_id: components["schemas"]["Id"] | null;
+            description: string | null;
+            /** @description Imponibile. */
+            taxable_amount: components["schemas"]["Amount"];
+            /** @description IVA; 0.00 per le operazioni senza IVA (ad esempio in reverse charge). */
+            vat_amount: components["schemas"]["Amount"];
+            /**
+             * @description Natura IVA della fattura senza IVA (es. N6.3, subappalto in inversione contabile),
+             *     solo con vat_amount 0.00. Facoltativa: se manca, alla creazione vale null e alla
+             *     modifica resta com'è; diventa null se l'IVA non è più zero.
+             */
+            vat_nature?: components["schemas"]["VatNature"] | null;
+            /**
+             * @description Ritenuta d'acconto trattenuta da chi paga (es. 20% sul compenso di un professionista,
+             *     4% del condominio sui lavori in appalto), mai oltre l'imponibile. Facoltativa: se manca, alla creazione vale 0.00 e alla modifica resta
+             *     com'è.
+             */
+            withholding_amount?: components["schemas"]["Amount"];
+            /**
+             * @description Scissione dei pagamenti (art. 17-ter DPR 633/72): fattura emessa a una pubblica
+             *     amministrazione, che versa l'IVA direttamente all'erario; amount_due non comprende
+             *     l'IVA. Solo per le emesse. Facoltativo: se manca, alla creazione vale false e alla
+             *     modifica resta com'è.
+             */
+            split_payment?: boolean;
+            /**
+             * @description Il SAL approvato che questa fattura emessa addebita (fattura d'acconto sullo stato di
+             *     avanzamento); una fattura per SAL. Facoltativo: se manca, alla creazione vale null e
+             *     alla modifica resta com'è. Solo per le emesse; con un cantiere indicato, il SAL deve
+             *     essere di un computo di quel cantiere.
+             */
+            progress_statement_id?: components["schemas"]["Id"] | null;
+            /**
+             * @description L'ordine al fornitore che questa fattura ricevuta addebita, per confrontarla con
+             *     l'ordinato: un ordine già inviato o ricevuto, dello stesso fornitore della fattura.
+             *     Un ordine può avere più fatture (consegne fatturate una per una). Facoltativo: se
+             *     manca, alla creazione vale null e alla modifica resta com'è. Solo per le ricevute.
+             */
+            purchase_order_id?: components["schemas"]["Id"] | null;
+            /**
+             * @description Fattura emessa di svincolo della ritenuta di garanzia trattenuta sui SAL del
+             *     cantiere, a fine lavori: il suo imponibile conta in retention_released del
+             *     riepilogo del cantiere. Solo per le emesse, con un cantiere e senza SAL collegato.
+             *     Facoltativo: se manca, alla creazione vale false e alla modifica resta com'è.
+             */
+            retention_release?: boolean;
+            /**
+             * @description Facoltativo: se manca, alla creazione vale invoice e alla modifica resta com'è.
+             *     Non si cambia dopo la creazione (422).
+             */
+            document_type?: components["schemas"]["InvoiceDocumentType"];
+            /**
+             * @description Solo per le note di credito, e per loro obbligatoria: la fattura che la nota storna,
+             *     della stessa direzione, dello stesso cliente o fornitore, dello stesso cantiere e
+             *     dello stesso ordine (422 sotto credited_invoice_id, site_id o purchase_order_id).
+             *     Le note di una fattura non superano quanto resta da pagare (amount_due meno i
+             *     pagamenti), né il suo imponibile né la sua IVA (422 sotto taxable_amount o
+             *     vat_amount). Su una fattura già pagata la nota è di rimborso (refund) e sta entro
+             *     quanto è stato pagato, meno le altre note di rimborso; non scende sotto i rimborsi
+             *     già registrati su di lei, e una fattura con note di rimborso deve restare pagata
+             *     almeno per il loro totale (422). Una nota
+             *     non ha due_date, paid_on, SAL, ritenuta, scissione dei pagamenti né svincolo (422
+             *     sotto il campo). Facoltativo: se manca, alla creazione vale null e alla modifica
+             *     resta com'è.
+             */
+            credited_invoice_id?: components["schemas"]["Id"] | null;
+            /** @description Scadenza di pagamento; alimenta lo scadenziario. */
+            due_date: components["schemas"]["Date"] | null;
+            /**
+             * @description Data del pagamento o dell'incasso; null se non ancora pagata. Se la fattura ha
+             *     pagamenti registrati (createInvoicePayment) il valore inviato non conta: paid_on è
+             *     la data dell'ultimo pagamento quando coprono amount_due, altrimenti null.
+             */
+            paid_on: components["schemas"]["Date"] | null;
+            notes: string | null;
+        };
+        Invoice: components["schemas"]["InvoiceInput"] & {
+            id: components["schemas"]["Id"];
+            /**
+             * @description La fattura stornata da questa nota di credito, con il suo numero; null sulle
+             *     fatture. Calcolato, si ignora nel corpo.
+             */
+            credited_invoice: {
+                id: components["schemas"]["Id"];
+                number: string;
+            } | null;
+            /**
+             * @description Somma dei totali delle note di credito che stornano questa fattura, comprese le
+             *     note di rimborso; 0.00 sulle note. Calcolato, si ignora nel corpo.
+             */
+            credited_amount: components["schemas"]["Amount"];
+            /**
+             * @description Solo sulle note di credito: true se la nota è stata scritta su una fattura già
+             *     pagata (nota di rimborso). Non abbassa quanto resta da pagare della fattura: i
+             *     soldi tornano indietro con i rimborsi registrati sulla nota
+             *     (createInvoicePayment), che contano col segno meno nel pagato e nella prima
+             *     nota. Si decide quando la nota viene scritta e non cambia. Sempre false sulle
+             *     fatture. Calcolato, si ignora nel corpo.
+             */
+            refund: boolean;
+            /**
+             * @description Su una nota di rimborso, quanto resta da rimborsare: il suo totale meno i
+             *     rimborsi registrati; 0.00 altrimenti. Calcolato, si ignora nel corpo.
+             */
+            refund_due_amount: components["schemas"]["Amount"];
+            /** @description Il PDF della fattura (o la sua scansione), o null. */
+            file: components["schemas"]["AttachedFile"] | null;
+            client: components["schemas"]["SubjectRef"] | null;
+            supplier: components["schemas"]["SubjectRef"] | null;
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+                /** @description CIG del cantiere (vedi Site), per i lavori pubblici. */
+                cig: string | null;
+                /** @description CUP del cantiere (vedi Site), per i lavori pubblici. */
+                cup: string | null;
+            } | null;
+            /**
+             * @description L'ordine al fornitore di purchase_order_id con il suo numero (come in
+             *     PurchaseOrderSummary), per mostrarlo senza un'altra chiamata; null senza ordine.
+             *     Calcolato, si ignora nel corpo.
+             */
+            purchase_order: {
+                id: components["schemas"]["Id"];
+                /** @example 2026/003 */
+                number: string;
+            } | null;
+            /** @description Imponibile più IVA. */
+            total: components["schemas"]["Amount"];
+            /**
+             * @description Netto a pagare (o da incassare): totale meno la ritenuta d'acconto e, con la
+             *     scissione dei pagamenti, meno l'IVA. Su una nota di credito è il suo totale col
+             *     segno meno. Senza note di credito è l'importo della scadenza nello scadenziario.
+             */
+            amount_due: components["schemas"]["SignedAmount"];
+            /**
+             * @description Somma degli incassi o pagamenti registrati (listInvoicePayments). Su una nota di
+             *     rimborso è la somma dei rimborsi col segno meno.
+             */
+            paid_amount: components["schemas"]["SignedAmount"];
+            /**
+             * @description Quanto resta da incassare o pagare: amount_due meno paid_amount e meno
+             *     credited_amount; 0.00 quando la fattura è pagata e sempre sulle note di credito,
+             *     che contano sulla fattura stornata. Una fattura coperta da pagamenti e note
+             *     risulta pagata (payment_status paid); una nota di credito è sempre paid. Quanto
+             *     resta da rimborsare su una nota di rimborso è in refund_due_amount.
+             */
+            remaining_amount: components["schemas"]["Amount"];
+            payment_status: components["schemas"]["InvoicePaymentStatus"];
+            /** @description La scadenza nello scadenziario; null senza scadenza di pagamento. */
+            deadline_id: components["schemas"]["Id"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description invoice: fattura (TD01). credit_note: nota di credito (TD04), con importi positivi che
+         *     contano col segno meno in tutti i totali (elenchi, saldi, IVA, ricavi, fatturato degli
+         *     ordini).
+         * @enum {string}
+         */
+        InvoiceDocumentType: "invoice" | "credit_note";
+        /**
+         * @description bank_transfer: bonifico. riba: ricevuta bancaria. check: assegno. cash: contanti.
+         *     card: carta o bancomat. other: altro (ad esempio una compensazione).
+         * @enum {string}
+         */
+        InvoicePaymentMethod: "bank_transfer" | "riba" | "check" | "cash" | "card" | "other";
         /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
+        InvoicePaymentInput: {
+            date: components["schemas"]["Date"];
+            /** @description Importo incassato o pagato, più di zero. */
+            amount: components["schemas"]["Amount"];
+            method: components["schemas"]["InvoicePaymentMethod"] | null;
+            notes: string | null;
+        };
+        InvoicePayment: {
+            id: components["schemas"]["Id"];
+            date: components["schemas"]["Date"];
+            /**
+             * @description Importo incassato o pagato. Un rimborso registrato su una nota di credito ha il
+             *     segno meno.
+             */
+            amount: components["schemas"]["SignedAmount"];
+            method: components["schemas"]["InvoicePaymentMethod"] | null;
+            notes: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PaymentList: {
+            data: (components["schemas"]["InvoicePayment"] & {
+                invoice: {
+                    id: components["schemas"]["Id"];
+                    number: string;
+                    direction: components["schemas"]["InvoiceDirection"];
+                    /** @description Il cliente (emesse) o il fornitore (ricevute). */
+                    subject: components["schemas"]["SubjectRef"];
+                    site: {
+                        id: components["schemas"]["Id"];
+                        name: string;
+                        code: string | null;
+                        /** @description CIG dell'appalto del cantiere, se c'è. */
+                        cig: string | null;
+                        /** @description CUP del progetto del cantiere, se c'è. */
+                        cup: string | null;
+                    } | null;
+                };
+            })[];
+            meta: components["schemas"]["ListMeta"];
+            /**
+             * @description Somma degli incassi (fatture emesse) filtrati, meno i rimborsi fatti ai clienti
+             *     sulle note di credito; può essere negativa.
+             */
+            collected: components["schemas"]["SignedAmount"];
+            /**
+             * @description Somma dei pagamenti (fatture ricevute) filtrati, meno i rimborsi ricevuti dai
+             *     fornitori sulle note di credito; può essere negativa.
+             */
+            paid: components["schemas"]["SignedAmount"];
+        };
+        InvoiceList: {
+            data: components["schemas"]["Invoice"][];
+            meta: components["schemas"]["ListMeta"];
+            /**
+             * @description Somma dei totali dei documenti filtrati, con le note di credito col segno meno
+             *     (negativa se nel filtro le note superano le fatture).
+             */
+            total_amount: components["schemas"]["SignedAmount"];
+            /**
+             * @description Somma di quanto resta da pagare o incassare (remaining_amount) delle fatture
+             *     filtrate non ancora pagate.
+             */
+            outstanding_amount: components["schemas"]["Amount"];
+        };
+        /**
+         * @description I campi facoltativi si inviano comunque, con null se vuoti; min_stock invece si può
+         *     omettere: un articolo nuovo resta senza scorta minima, una modifica la lascia com'è.
+         */
         WarehouseItemInput: {
             code: string | null;
             name: string;
             /** @example sacchi */
             unit: string;
             notes: string | null;
+            /**
+             * @description Scorta minima, da zero in su con il punto e al massimo tre decimali (in uscita
+             *     sempre tre); null se l'articolo non ne ha.
+             * @example 50.000
+             */
+            min_stock?: string | null;
         };
         WarehouseItem: components["schemas"]["WarehouseItemInput"] & {
             id: components["schemas"]["Id"];
             stock: components["schemas"]["Quantity"];
+            /**
+             * @description Costo medio ponderato dei carichi con un costo (somma di quantità per costo
+             *     diviso la somma delle quantità), arrotondato al centesimo; null se nessun carico
+             *     ha un costo.
+             */
+            average_cost: components["schemas"]["Amount"] | null;
+            /**
+             * @description Valore della giacenza al costo medio (giacenza per costo medio non arrotondato,
+             *     arrotondato al centesimo); zero se la giacenza non è positiva, null se non c'è
+             *     un costo medio.
+             */
+            stock_value: components["schemas"]["Amount"] | null;
+            /** @description true se c'è una scorta minima e la giacenza è sotto. */
+            below_min: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -3537,6 +8269,12 @@ export interface components {
         WarehouseItemList: {
             data: components["schemas"]["WarehouseItem"][];
             meta: components["schemas"]["ListMeta"];
+            /**
+             * @description Somma di stock_value di tutti gli articoli che rispondono alla ricerca e ai filtri,
+             *     non solo di questa pagina (gli articoli senza costo medio non contano): il valore
+             *     delle rimanenze.
+             */
+            stock_value: components["schemas"]["Amount"];
         };
         /**
          * @description in: carico. out: scarico.
@@ -3552,9 +8290,42 @@ export interface components {
             quantity: components["schemas"]["Quantity"];
             site_id: components["schemas"]["Id"] | null;
             notes: string | null;
+            /**
+             * @description Costo unitario senza IVA di un carico, nell'unità dell'articolo; dà il costo medio
+             *     dell'articolo e il valore della giacenza. Si può omettere; null se non si sa. Uno
+             *     scarico non ha costo: con kind out deve essere null o assente (422).
+             */
+            unit_cost?: components["schemas"]["Amount"] | null;
+            /**
+             * @description Materiale che torna in magazzino dal cantiere site_id: un carico (kind in) con
+             *     site_id e senza unit_cost (altrimenti 422). Vale il costo medio dell'articolo fino
+             *     al suo giorno, non entra nel costo medio e si sottrae da warehouse_materials nel
+             *     riepilogo dei costi del cantiere. Si può omettere; false per un carico qualsiasi,
+             *     anche consegnato in cantiere.
+             * @default false
+             */
+            site_return: boolean;
+        };
+        WarehouseStockCountLine: {
+            item_id: components["schemas"]["Id"];
+            /** @description Giacenza alla data della conta, prima della rettifica. */
+            stock: components["schemas"]["Quantity"];
+            counted: components["schemas"]["Quantity"];
+            /** @description Il movimento di rettifica; null se la conta coincide. */
+            movement: components["schemas"]["WarehouseMovement"] | null;
         };
         WarehouseMovement: components["schemas"]["WarehouseMovementInput"] & {
             id: components["schemas"]["Id"];
+            unit_cost: components["schemas"]["Amount"] | null;
+            /**
+             * @description Calcolato, si ignora nel corpo. Un carico vale la quantità per il suo costo
+             *     unitario (null senza costo); uno scarico o un reso dal cantiere la quantità per il
+             *     costo medio ponderato dei carichi con costo dell'articolo fino al suo giorno (null
+             *     se non ce ne sono).
+             *     Arrotondato al centesimo. È lo stesso valore che somma warehouse_materials nel
+             *     riepilogo dei costi del cantiere.
+             */
+            value: components["schemas"]["Amount"] | null;
             /** @description L'ordine ricevuto da cui viene il carico, se c'è. */
             purchase_order: {
                 id: components["schemas"]["Id"];
@@ -3599,6 +8370,110 @@ export interface components {
             over_budget: boolean;
             /** @description Righe dei rapportini approvati con dipendenti o mezzi senza costo orario. */
             missing_hourly_costs: number;
+            /** @description Null senza invoices.view. */
+            revenue: components["schemas"]["SiteRevenue"] | null;
+            /** @description Null senza warehouse.view. Non entra in total. */
+            warehouse_materials: components["schemas"]["SiteWarehouseMaterials"] | null;
+            /** @description Null senza purchases.view. Non entra in total. */
+            purchase_orders: components["schemas"]["SitePurchaseOrders"] | null;
+        };
+        SitePurchaseOrders: {
+            /** @description Ordini del cantiere inviati o ricevuti (le bozze no). */
+            count: number;
+            /** @description Quanti di questi sono già ricevuti. */
+            received: number;
+            /**
+             * @description Somma dei totali degli ordini contati (senza IVA, come total dell'ordine): il costo
+             *     impegnato con i fornitori.
+             */
+            total: components["schemas"]["Amount"];
+            /** @description La parte di total degli ordini già ricevuti. */
+            received_total: components["schemas"]["Amount"];
+            /**
+             * @description Imponibile delle fatture ricevute collegate a questi ordini, la somma di
+             *     invoiced_amount degli ordini. Null senza invoices.view.
+             */
+            invoiced: components["schemas"]["Amount"] | null;
+        };
+        SiteWarehouseMaterialList: {
+            data: components["schemas"]["SiteWarehouseMaterial"][];
+            /** @description Somma di amount, uguale a warehouse_materials.amount del riepilogo dei costi. */
+            amount: components["schemas"]["SignedAmount"];
+        };
+        SiteWarehouseMaterial: {
+            item: {
+                id: components["schemas"]["Id"];
+                code: string | null;
+                name: string;
+                unit: string;
+            };
+            /** @description Quantità scaricata sul cantiere. */
+            unloaded: components["schemas"]["Quantity"];
+            /** @description Quantità tornata in magazzino dal cantiere. */
+            returned: components["schemas"]["Quantity"];
+            /** @description Scaricata meno tornata; negativa se è tornato più di quanto scaricato. */
+            net: components["schemas"]["Quantity"];
+            /**
+             * @description Scarichi meno resi, ciascuno al costo medio dell'articolo fino al suo giorno,
+             *     arrotondato al centesimo movimento per movimento.
+             */
+            amount: components["schemas"]["SignedAmount"];
+            /** @description Scarichi e resi senza nessun carico con costo fino a quel giorno. */
+            missing_costs: number;
+        };
+        SiteWarehouseMaterials: {
+            /**
+             * @description Somma degli scarichi verso il cantiere meno i resi dal cantiere (site_return),
+             *     ciascuno per il costo medio ponderato dei carichi con costo dell'articolo fino al
+             *     suo giorno, arrotondato al centesimo movimento per movimento. Gli scarichi e i resi
+             *     senza un costo medio valgono zero. Può essere negativo se il materiale torna quando
+             *     il costo medio è salito.
+             */
+            amount: components["schemas"]["SignedAmount"];
+            /** @description Scarichi dal magazzino verso il cantiere. */
+            movements: number;
+            /** @description Resi dal cantiere al magazzino. */
+            returns: number;
+            /** @description Scarichi e resi di articoli senza nessun carico con costo fino a quel giorno. */
+            missing_costs: number;
+        };
+        SiteRevenue: {
+            /** @description Imponibile delle fatture emesse collegate al cantiere, pagate o no. */
+            invoiced: components["schemas"]["Amount"];
+            /** @description Fatturato meno il totale dei costi; negativo se i costi superano il fatturato. */
+            margin: components["schemas"]["SignedAmount"];
+            /**
+             * @description Incassato sulle fatture emesse del cantiere: il netto a pagare (amount_due, con
+             *     l'IVA) di quelle pagate più gli acconti registrati su quelle non ancora pagate.
+             */
+            collected: components["schemas"]["Amount"];
+            /** @description Da incassare sulle fatture emesse del cantiere (somma dei remaining_amount). */
+            to_collect: components["schemas"]["Amount"];
+            /**
+             * @description Importo dei SAL approvati dei computi del cantiere, prima della ritenuta di garanzia;
+             *     null senza estimates.view. Negativo solo con SAL di correzione.
+             */
+            certified: components["schemas"]["SignedAmount"] | null;
+            /**
+             * @description La parte di certified dei SAL approvati senza fattura collegata: maturato da
+             *     fatturare. Null senza estimates.view.
+             */
+            certified_uninvoiced: components["schemas"]["SignedAmount"] | null;
+            /**
+             * @description Ritenuta di garanzia dei SAL approvati (retention_amount), da svincolare a fine
+             *     lavori. Null senza estimates.view.
+             */
+            retention_held: components["schemas"]["SignedAmount"] | null;
+            /**
+             * @description Imponibile delle fatture emesse di svincolo della ritenuta (retention_release) del
+             *     cantiere, pagate o no.
+             */
+            retention_released: components["schemas"]["Amount"];
+            /**
+             * @description Ritenuta ancora da svincolare: retention_held meno retention_released; negativa se
+             *     si è svincolato più di quanto trattenuto. Null senza estimates.view.
+             */
+            retention_to_release: components["schemas"]["SignedAmount"] | null;
         };
         HoursCost: {
             /** @description Ore totali con due decimali. */
@@ -3618,6 +8493,8 @@ export interface components {
         SiteDocument: components["schemas"]["SiteDocumentInput"] & {
             id: components["schemas"]["Id"];
             site_id: components["schemas"]["Id"];
+            /** @description Rapportino a cui il file è collegato, o null. */
+            daily_report_id: components["schemas"]["Id"] | null;
             kind: components["schemas"]["SiteDocumentKind"];
             file_name: string;
             content_type: string;
@@ -3634,14 +8511,104 @@ export interface components {
             data: components["schemas"]["SiteDocument"][];
             meta: components["schemas"]["ListMeta"];
         };
+        SearchResults: {
+            /** @description Il testo cercato */
+            q: string;
+            items: components["schemas"]["SearchHit"][];
+        };
+        SearchHit: {
+            /** @enum {string} */
+            type: "client" | "supplier" | "site" | "quote" | "estimate" | "invoice" | "purchase_order" | "employee" | "vehicle" | "deadline" | "price_list_item" | "site_document" | "warehouse_item" | "site_activity" | "vehicle_document" | "employee_document";
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description Il prezzario della voce, il cantiere del documento o dell'attività, il mezzo del
+             *     documento del mezzo; null per gli altri tipi.
+             */
+            parent_id: string | null;
+            /** @description Cosa mostrare: nome, oggetto o numero. */
+            title: string;
+            /** @description Un dettaglio per distinguere risultati simili (città, codice, numero, data). */
+            subtitle: string | null;
+        };
         Dashboard: {
             today: components["schemas"]["Date"];
-            /** @description Numero di cantieri per stato. */
+            /**
+             * @description Oggi è festivo, con la regola di holiday dei rapportini: domenica, festivo nazionale
+             *     (Pasquetta compresa) o santo patrono dei dati dell'azienda (patron_saint_day). Senza
+             *     permessi, come listHolidays. Serve al frontend per non sollecitare reports.missing_today
+             *     nei giorni in cui non si lavora.
+             */
+            today_holiday: boolean;
+            /**
+             * @description Numero di cantieri per stato, cantieri non chiusi senza notifica preliminare, cantieri
+             *     non chiusi oltre la fine prevista, cantieri non chiusi con la fine prevista nei
+             *     prossimi 14 giorni, cantieri da iniziare con l'inizio previsto già arrivato,
+             *     cantieri da iniziare o in corso senza squadra, cantieri non chiusi senza titolo
+             *     edilizio, cantieri non chiusi senza coordinatore per la sicurezza, cantieri non
+             *     chiusi senza direttore dei lavori, cantieri non chiusi senza budget, cantieri
+             *     non chiusi senza posizione sulla mappa e cantieri non chiusi senza cliente.
+             */
             sites: {
                 planned: number;
                 active: number;
                 suspended: number;
                 completed: number;
+                /**
+                 * @description Cantieri non chiusi senza la data della notifica preliminare, come
+                 *     filter[prior_notice_missing]=true di listSites.
+                 */
+                without_prior_notice: number;
+                /**
+                 * @description Cantieri non chiusi con la fine prevista già passata, come
+                 *     filter[past_end]=true di listSites.
+                 */
+                past_end: number;
+                /**
+                 * @description Cantieri non chiusi con la fine prevista da oggi ai prossimi 14 giorni, come
+                 *     filter[ending_soon]=true di listSites.
+                 */
+                ending_soon: number;
+                /**
+                 * @description Cantieri da iniziare con l'inizio previsto oggi o già passato, da avviare o
+                 *     riprogrammare, come filter[start_due]=true di listSites.
+                 */
+                start_due: number;
+                /**
+                 * @description Cantieri da iniziare o in corso senza nessun dipendente in servizio nella
+                 *     squadra, come filter[without_team]=true di listSites.
+                 */
+                without_team: number;
+                /**
+                 * @description Cantieri non chiusi senza il titolo edilizio, come
+                 *     filter[permit_missing]=true di listSites.
+                 */
+                without_permit: number;
+                /**
+                 * @description Cantieri non chiusi senza il coordinatore per la sicurezza in esecuzione,
+                 *     come filter[safety_coordinator_missing]=true di listSites.
+                 */
+                without_safety_coordinator: number;
+                /**
+                 * @description Cantieri non chiusi senza il direttore dei lavori, come
+                 *     filter[works_director_missing]=true di listSites.
+                 */
+                without_works_director: number;
+                /**
+                 * @description Cantieri non chiusi senza il budget, come filter[budget_missing]=true di
+                 *     listSites.
+                 */
+                without_budget: number;
+                /**
+                 * @description Cantieri non chiusi senza la posizione sulla mappa, come
+                 *     filter[location_missing]=true di listSites.
+                 */
+                without_location: number;
+                /**
+                 * @description Cantieri non chiusi senza il cliente, come filter[client_missing]=true di
+                 *     listSites.
+                 */
+                without_client: number;
             } | null;
             over_budget: components["schemas"]["DashboardOverBudgetSite"][] | null;
             costs_this_month: {
@@ -3649,13 +8616,290 @@ export interface components {
                 month: string;
                 total: components["schemas"]["SignedAmount"];
             } | null;
+            costs_by_month: components["schemas"]["DashboardMonthCosts"][] | null;
+            site_progress: components["schemas"]["DashboardSiteProgress"][] | null;
             reports: {
                 /** @description Rapportini inviati, in attesa di approvazione. */
                 to_approve: number;
                 /** @description Rapportini in bozza di giorni passati, ancora da inviare. */
                 drafts: number;
+                /**
+                 * @description Cantieri attivi senza un rapportino (in qualunque stato) con la data di oggi,
+                 *     da sollecitare al capo cantiere. Si conta ogni giorno, sabato e domenica
+                 *     compresi: è il frontend a decidere se mostrarlo, ad esempio non nei giorni con
+                 *     today_holiday. null senza sites.view.
+                 */
+                missing_today: number | null;
+                /**
+                 * @description Cantieri attivi senza nessun rapportino (in qualunque stato) con la data negli
+                 *     ultimi 7 giorni, oggi compreso: lavori fermi o rapportini dimenticati. Gli
+                 *     stessi di filter[without_recent_reports]=true di listSites. null senza
+                 *     sites.view.
+                 */
+                missing_week: number | null;
             } | null;
             deadlines: components["schemas"]["DashboardDeadline"][] | null;
+            invoices: components["schemas"]["DashboardInvoices"] | null;
+            /**
+             * @description Con invoices.view: il riepilogo IVA (come getVatSummary) del mese e del trimestre in
+             *     corso in Italia, per chi liquida l'IVA mensilmente e per chi lo fa ogni trimestre.
+             */
+            vat: components["schemas"]["DashboardVat"] | null;
+            /**
+             * @description SAL di tutti i computi: in bozza, e approvati senza una fattura emessa collegata
+             *     (da fatturare), con l'importo e il netto dopo la ritenuta di garanzia. Sono gli
+             *     stessi di listCompanyProgressStatements con filter[status]=approved e
+             *     filter[invoiced]=false.
+             */
+            progress_statements: {
+                drafts: number;
+                to_invoice: number;
+                to_invoice_amount: components["schemas"]["SignedAmount"];
+                to_invoice_net_amount: components["schemas"]["SignedAmount"];
+            } | null;
+            quotes: components["schemas"]["DashboardQuotes"] | null;
+            purchase_orders: components["schemas"]["DashboardPurchaseOrders"] | null;
+            warehouse: {
+                /** @description Articoli sotto la scorta minima, da riordinare. */
+                below_min: number;
+                /**
+                 * @description Valore di tutto il magazzino oggi al costo medio, come stock_value di
+                 *     listWarehouseItems senza filtri.
+                 */
+                stock_value: components["schemas"]["Amount"];
+            } | null;
+            subcontractors: {
+                /** @description Con almeno un documento scaduto. */
+                expired: number;
+                /** @description Nessuno scaduto, almeno uno in scadenza entro 30 giorni. */
+                expiring: number;
+                /** @description Senza un DURC valido oggi. */
+                no_valid_durc: number;
+                /** @description Senza una patente a crediti valida oggi. */
+                no_valid_credit_license: number;
+                /**
+                 * @description Cantieri in corso con almeno un subappaltatore (con un costo o un ordine sul
+                 *     cantiere, anche archiviato) con un documento scaduto: gli stessi di
+                 *     filter[subcontractor_compliance]=expired con filter[status]=active in
+                 *     listSites. null senza sites.view.
+                 */
+                active_sites_expired: number | null;
+                /**
+                 * @description Cantieri in corso con almeno un subappaltatore senza un DURC valido oggi
+                 *     (filter[subcontractor_compliance]=no_valid_durc). null senza sites.view.
+                 */
+                active_sites_no_valid_durc: number | null;
+                /**
+                 * @description Cantieri in corso con almeno un subappaltatore senza una patente a crediti
+                 *     valida oggi (filter[subcontractor_compliance]=no_valid_credit_license). null
+                 *     senza sites.view.
+                 */
+                active_sites_no_valid_credit_license: number | null;
+            } | null;
+            vehicles: {
+                /** @description Con almeno un documento scaduto. */
+                documents_expired: number;
+                /** @description Nessuno scaduto, almeno uno in scadenza entro 30 giorni. */
+                documents_expiring: number;
+                /**
+                 * @description Con la prossima manutenzione (next_due_on) già passata e la sua scadenza
+                 *     ancora aperta.
+                 */
+                maintenance_overdue: number;
+                /**
+                 * @description Nessuna manutenzione passata, almeno una aperta entro 30 giorni (oggi
+                 *     compreso).
+                 */
+                maintenance_due_soon: number;
+            } | null;
+            employees: {
+                /** @description Con almeno un documento scaduto. */
+                documents_expired: number;
+                /** @description Nessuno scaduto, almeno uno in scadenza entro 30 giorni. */
+                documents_expiring: number;
+                /**
+                 * @description Cantieri in corso con almeno un dipendente della squadra (anche non attivo)
+                 *     con un documento scaduto: gli stessi di filter[team_documents]=expired con
+                 *     filter[status]=active in listSites. null senza sites.view.
+                 */
+                active_sites_expired: number | null;
+            } | null;
+            activities: components["schemas"]["DashboardActivities"] | null;
+            absences: components["schemas"]["DashboardAbsences"] | null;
+        };
+        /**
+         * @description Estratto conto di un cliente (fatture emesse) o di un fornitore (fatture ricevute).
+         *     Gli importi seguono quelli della fattura: total è imponibile più IVA; amount_due è il
+         *     netto a pagare, senza la ritenuta d'acconto e senza l'IVA in scissione dei pagamenti;
+         *     settled è amount_due meno outstanding. Scaduto: residuo delle fatture non pagate con la
+         *     scadenza di pagamento passata (giorno italiano).
+         */
+        SubjectAccount: {
+            invoice_count: number;
+            /** @description Fatture non ancora pagate. */
+            open_invoice_count: number;
+            /** @description Imponibile più IVA di tutte le fatture. */
+            total: components["schemas"]["Amount"];
+            amount_due: components["schemas"]["Amount"];
+            /** @description Già incassato (cliente) o pagato (fornitore). */
+            settled: components["schemas"]["Amount"];
+            /** @description Ancora da incassare o da pagare. */
+            outstanding: components["schemas"]["Amount"];
+            /** @description Parte di outstanding già scaduta. */
+            overdue: components["schemas"]["Amount"];
+        };
+        SubjectBalanceList: {
+            data: {
+                subject: components["schemas"]["SubjectRef"];
+                open_invoice_count: number;
+                /** @description Ancora da incassare o da pagare. */
+                outstanding: components["schemas"]["Amount"];
+                /** @description Parte di outstanding già scaduta. */
+                overdue: components["schemas"]["Amount"];
+                /** @description La scadenza più vecchia tra le fatture aperte; null se nessuna ne ha. */
+                oldest_due_date: components["schemas"]["Date"] | null;
+            }[];
+            meta: components["schemas"]["ListMeta"];
+            outstanding: components["schemas"]["Amount"];
+            overdue: components["schemas"]["Amount"];
+        };
+        /** @description Da incassare (fatture emesse), da pagare (ricevute) e la differenza. */
+        CashFlowAmounts: {
+            incoming: components["schemas"]["Amount"];
+            outgoing: components["schemas"]["Amount"];
+            net: components["schemas"]["SignedAmount"];
+        };
+        CashFlowMonth: components["schemas"]["CashFlowAmounts"] & {
+            /** @description AAAA-MM. */
+            month: string;
+            /** @description Saldo accumulato, scaduto compreso, alla fine del mese. */
+            balance: components["schemas"]["SignedAmount"];
+        };
+        CashFlowForecast: {
+            /** @description La data di oggi in Italia, su cui è calcolato lo scaduto. */
+            today: components["schemas"]["Date"];
+            /** @description Fatture con la scadenza già passata. */
+            overdue: components["schemas"]["CashFlowAmounts"];
+            /** @description Dal mese in corso, uno per mese, anche quelli a zero. */
+            months: components["schemas"]["CashFlowMonth"][];
+            /** @description Fatture con la scadenza dopo l'ultimo mese. */
+            later: components["schemas"]["CashFlowAmounts"];
+            /** @description Fatture senza scadenza di pagamento. */
+            undated: components["schemas"]["CashFlowAmounts"];
+            /** @description Somma di tutte le fatture aperte. */
+            total: components["schemas"]["CashFlowAmounts"];
+        };
+        /**
+         * @description Imponibile e IVA delle fatture emesse e ricevute, e il saldo IVA. Le note di credito
+         *     contano col segno meno: in un periodo con più note che fatture gli importi sono negativi.
+         */
+        VatSummaryAmounts: {
+            sales_taxable: components["schemas"]["SignedAmount"];
+            sales_vat: components["schemas"]["SignedAmount"];
+            /** @description Parte di sales_vat in scissione dei pagamenti. */
+            sales_split_payment_vat: components["schemas"]["SignedAmount"];
+            purchases_taxable: components["schemas"]["SignedAmount"];
+            purchases_vat: components["schemas"]["SignedAmount"];
+            /** @description Imponibile delle fatture ricevute con natura N6.x, parte di purchases_taxable. */
+            reverse_charge_taxable: components["schemas"]["SignedAmount"];
+            /** @description IVA a debito se positivo, a credito se negativo. */
+            balance: components["schemas"]["SignedAmount"];
+        };
+        VatSummaryPeriod: components["schemas"]["VatSummaryAmounts"] & {
+            /** @description AAAA-MM per i mesi, AAAA-Q1 … AAAA-Q4 per i trimestri. */
+            period: string;
+            /** @description Primo giorno del periodo. */
+            from: components["schemas"]["Date"];
+            /** @description Ultimo giorno del periodo, compreso. */
+            to: components["schemas"]["Date"];
+        };
+        VatSummary: {
+            year: number;
+            /** @enum {string} */
+            period: "month" | "quarter";
+            /** @description Tutti i mesi o i trimestri dell'anno, anche quelli a zero, in ordine. */
+            periods: components["schemas"]["VatSummaryPeriod"][];
+            /** @description Somma dell'anno. */
+            total: components["schemas"]["VatSummaryAmounts"];
+        };
+        DashboardVat: {
+            month: components["schemas"]["VatSummaryPeriod"];
+            quarter: components["schemas"]["VatSummaryPeriod"];
+        };
+        /**
+         * @description Fatture non ancora pagate, per quanto resta da pagare (remaining_amount: il netto a
+         *     pagare, cioè senza la ritenuta d'acconto e senza l'IVA in scissione dei pagamenti, meno
+         *     gli acconti già registrati). Scadute: con la scadenza di pagamento passata.
+         */
+        DashboardInvoices: {
+            /** @description Da incassare, dalle fatture emesse. */
+            receivable: components["schemas"]["Amount"];
+            /** @description Parte di receivable già scaduta. */
+            receivable_overdue: components["schemas"]["Amount"];
+            /** @description Da pagare, dalle fatture ricevute. */
+            payable: components["schemas"]["Amount"];
+            /** @description Parte di payable già scaduta. */
+            payable_overdue: components["schemas"]["Amount"];
+            /**
+             * @description Fatture ricevute non pagate e senza ordine al fornitore, da controllare prima di
+             *     pagarle: le stesse di filter[direction]=received con filter[has_purchase_order]=false
+             *     e filter[status] open o overdue.
+             */
+            payable_without_order: number;
+            /** @description Parte di payable dovuta alle fatture di payable_without_order. */
+            payable_without_order_amount: components["schemas"]["Amount"];
+        };
+        /**
+         * @description Ordini ai fornitori da seguire, con purchases.view, con le stesse condizioni di
+         *     filter[follow_up] in listPurchaseOrders. In attesa: inviati (status sent) e non ancora
+         *     ricevuti; l'importo è la somma dei loro totali. Gli ordini senza data di consegna
+         *     contano solo in awaiting. received_uninvoiced e received_uninvoiced_total, solo con
+         *     anche invoices.view (altrimenti null), sono gli stessi ordini di filter[status]=received
+         *     con filter[invoiced]=false: la merce arrivata di cui manca la fattura del fornitore.
+         */
+        DashboardPurchaseOrders: {
+            /** @description Ordini in bozza, ancora da inviare. */
+            drafts: number;
+            /** @description Ordini inviati e non ancora ricevuti. */
+            awaiting: number;
+            /** @description Totale degli ordini in attesa. */
+            awaiting_total: components["schemas"]["Amount"];
+            /** @description In attesa con la consegna prevista già passata, da sollecitare. */
+            late: number;
+            /** @description In attesa con la consegna prevista entro 7 giorni da oggi, oggi compreso. */
+            due_soon: number;
+            /** @description Ordini ricevuti senza nessuna fattura ricevuta collegata; null senza invoices.view. */
+            received_uninvoiced: number | null;
+            /**
+             * @description Ordini con l'imponibile fatturato oltre il totale, gli stessi di
+             *     filter[over_invoiced]=true in listPurchaseOrders; null senza invoices.view.
+             */
+            over_invoiced: number | null;
+            /**
+             * @description Totale degli ordini in received_uninvoiced, da aspettarsi in fattura; null senza
+             *     invoices.view.
+             */
+            received_uninvoiced_total: components["schemas"]["Amount"] | null;
+        };
+        /**
+         * @description Preventivi da seguire, con quotes.view. In attesa: inviati (status sent) e non
+         *     sostituiti da una revisione già inviata (una revisione in bozza non conta: il cliente ha
+         *     ancora il preventivo di prima); l'importo è la somma dei loro imponibili. Validità: la
+         *     data valid_until del preventivo, cioè la data più validity_days.
+         */
+        DashboardQuotes: {
+            /** @description Preventivi in bozza. */
+            drafts: number;
+            /** @description Preventivi in attesa di risposta del cliente. */
+            awaiting: number;
+            /** @description Imponibile dei preventivi in attesa. */
+            awaiting_taxable: components["schemas"]["SignedAmount"];
+            /** @description In attesa con la validità che finisce entro 7 giorni da oggi, oggi compreso. */
+            expiring: number;
+            /** @description In attesa con la validità già finita, da sollecitare o da segnare scaduti. */
+            past_validity: number;
+            /** @description Preventivi accettati da cui non è ancora stato creato un cantiere. */
+            accepted_without_site: number;
         };
         DashboardOverBudgetSite: {
             site: {
@@ -3668,10 +8912,71 @@ export interface components {
             /** @description Quanto i costi superano il budget. */
             overrun: components["schemas"]["SignedAmount"];
         };
+        DashboardMonthCosts: {
+            /** @description AAAA-MM. */
+            month: string;
+            /** @description Manodopera dai rapportini approvati. */
+            labor: components["schemas"]["SignedAmount"];
+            /** @description Mezzi dai rapportini approvati. */
+            vehicles: components["schemas"]["SignedAmount"];
+            /** @description Costi inseriti a mano (materiali, noli, subappalti...). */
+            other: components["schemas"]["SignedAmount"];
+            total: components["schemas"]["SignedAmount"];
+        };
+        SiteMonthlyCosts: {
+            budget: components["schemas"]["Amount"] | null;
+            /** @description Dal mese più vecchio. */
+            months: components["schemas"]["SiteMonthCosts"][];
+        };
+        SiteSupplierCosts: {
+            /** @description Somma di tutte le righe. */
+            total: components["schemas"]["Amount"];
+            suppliers: components["schemas"]["SiteSupplierCost"][];
+        };
+        SiteSupplierCost: {
+            /** @description Null per i costi senza fornitore. */
+            supplier: components["schemas"]["SubjectRef"] | null;
+            /** @description Quanti costi inseriti. */
+            costs: number;
+            materials: components["schemas"]["Amount"];
+            rentals: components["schemas"]["Amount"];
+            subcontract: components["schemas"]["Amount"];
+            other: components["schemas"]["Amount"];
+            total: components["schemas"]["Amount"];
+        };
+        SiteMonthCosts: components["schemas"]["DashboardMonthCosts"] & {
+            /** @description Totale dei costi dal primo mese fino a questo compreso. */
+            cumulative: components["schemas"]["SignedAmount"];
+            /** @description Imponibile delle fatture emesse del mese. Null senza invoices.view. */
+            invoiced: components["schemas"]["SignedAmount"] | null;
+            /** @description Fatturato dal primo mese fino a questo compreso. Null senza invoices.view. */
+            cumulative_invoiced: components["schemas"]["SignedAmount"] | null;
+        };
+        DashboardSiteProgress: {
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+            };
+            activities: number;
+            /** @description Avanzamento delle attività, pesato sulla loro durata in giorni. */
+            progress: number;
+            /**
+             * @description Avanzamento previsto a oggi: la parte dei giorni delle attività già trascorsa, con la
+             *     stessa pesatura.
+             */
+            planned: number;
+        };
         DashboardDeadline: {
             id: components["schemas"]["Id"];
             title: string;
             due_on: components["schemas"]["Date"];
+            /**
+             * @description Primo giorno lavorativo uguale o successivo a `due_on`, come in Deadline: da lunedì a
+             *     venerdì, escluse le festività nazionali con Pasquetta e il santo patrono dell'azienda.
+             *     overdue resta legato a `due_on`.
+             */
+            working_due_on: components["schemas"]["Date"];
             kind: components["schemas"]["DeadlineKind"];
             amount: components["schemas"]["SignedAmount"] | null;
             overdue: boolean;
@@ -3682,6 +8987,13 @@ export interface components {
             name: string;
             year: number | null;
             notes: string | null;
+        };
+        PriceListDuplicateInput: components["schemas"]["PriceListInput"] & {
+            /**
+             * @description Variazione dei prezzi in percentuale, da -99.99 a 100, fino a due decimali;
+             *     null per copiare i prezzi come sono.
+             */
+            price_change_percent: string | null;
         };
         PriceList: components["schemas"]["PriceListInput"] & {
             id: components["schemas"]["Id"];
@@ -3715,6 +9027,14 @@ export interface components {
             data: components["schemas"]["PriceListItem"][];
             meta: components["schemas"]["ListMeta"];
         };
+        PriceListImportResult: {
+            /** @description Voci aggiunte. */
+            created: number;
+            /** @description Voci già nel prezzario con descrizione, unità o prezzo cambiati. */
+            updated: number;
+            /** @description Voci già nel prezzario e uguali a quelle del file. */
+            unchanged: number;
+        };
         /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
         SiteActivityInput: {
             name: string;
@@ -3733,10 +9053,81 @@ export interface components {
         SiteActivity: components["schemas"]["SiteActivityInput"] & {
             id: components["schemas"]["Id"];
             site_id: components["schemas"]["Id"];
+            /**
+             * @description Durata in giorni lavorativi da start_on a end_on, estremi compresi: da lunedì a
+             *     venerdì, senza le festività nazionali (con Pasquetta) e il santo patrono dei dati
+             *     dell'azienda, come working_days delle assenze. Si calcola, non si invia.
+             */
+            working_days: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /**
+         * @description late: non finite con la fine già passata. starting_soon: non iniziate che iniziano entro
+         *     7 giorni, oggi compreso. in_progress: non finite in corso oggi. Solo cantieri previsti o
+         *     in corso.
+         * @enum {string}
+         */
+        ActivityFollowUp: "late" | "starting_soon" | "in_progress";
+        CompanyActivityList: {
+            data: (components["schemas"]["SiteActivity"] & {
+                site: {
+                    id: components["schemas"]["Id"];
+                    name: string;
+                    code: string | null;
+                    status: components["schemas"]["SiteStatus"];
+                    /** @description CIG del cantiere (vedi Site), per i lavori pubblici. */
+                    cig: string | null;
+                    /** @description CUP del cantiere (vedi Site), per i lavori pubblici. */
+                    cup: string | null;
+                };
+                /**
+                 * @description Giorni passati dalla fine prevista per un'attività non finita; 0 se è
+                 *     finita o la fine non è ancora passata.
+                 */
+                days_late: number;
+                /**
+                 * @description Giorni lavorativi che restano a un'attività non finita (avanzamento sotto
+                 *     100): da oggi, o dall'inizio se è più avanti, alla fine prevista, estremi
+                 *     compresi, con le stesse regole di working_days (da lunedì a venerdì, senza
+                 *     festività nazionali con Pasquetta e santo patrono dell'azienda), sulla data
+                 *     italiana. 0 se l'attività è finita o la fine è già passata.
+                 */
+                remaining_working_days: number;
+            })[];
+            meta: components["schemas"]["ListMeta"];
+        };
+        /**
+         * @description Attività del cronoprogramma da seguire, con sites.view, con le stesse condizioni di
+         *     filter[follow_up] in listCompanyActivities (solo cantieri previsti o in corso).
+         */
+        DashboardActivities: {
+            /** @description Attività non finite con la fine già passata. */
+            late: number;
+            /** @description Attività non iniziate che iniziano entro 7 giorni da oggi, oggi compreso. */
+            starting_soon: number;
+        };
+        /**
+         * @description Assenze dei dipendenti attivi (listCompanyAbsences), con employees.view, sulla data
+         *     italiana: per sapere chi manca in squadra.
+         */
+        DashboardAbsences: {
+            /** @description Dipendenti attivi con un'assenza che comprende oggi. */
+            away_today: number;
+            /** @description Assenze di dipendenti attivi che iniziano nei prossimi 7 giorni, da domani. */
+            starting_soon: number;
+            /**
+             * @description Dipendenti attivi che nell'anno in corso hanno fatto più ferie di quelle spettanti e
+             *     riportate (getAbsenceTotals con filter[vacation]=exceeded).
+             */
+            vacation_exceeded: number;
+            /**
+             * @description Dipendenti attivi che nell'anno in corso hanno fatto più ore di permesso di quelle
+             *     spettanti (getAbsenceTotals con filter[permit]=exceeded).
+             */
+            permit_exceeded: number;
         };
         SiteActivityList: {
             data: components["schemas"]["SiteActivity"][];
@@ -3751,6 +9142,12 @@ export interface components {
             /** @description Data del SAL («lavori eseguiti a tutto il»). */
             statement_date: components["schemas"]["Date"];
             notes: string | null;
+            /**
+             * @description Ritenuta di garanzia in percentuale, da 0 a 100, fino a due decimali. Facoltativa:
+             *     se manca (o è null), alla creazione vale quella del SAL precedente del computo (0
+             *     per il primo) e alla modifica resta com'è.
+             */
+            retention_percent?: string | null;
             /** @description Una riga per voce del computo, senza doppioni. */
             lines: {
                 item_id: components["schemas"]["Id"];
@@ -3760,6 +9157,8 @@ export interface components {
         };
         ProgressStatementSummary: {
             id: components["schemas"]["Id"];
+            /** @description La fattura emessa che addebita questo SAL (progress_statement_id), o null. */
+            invoice_id: components["schemas"]["Id"] | null;
             estimate_id: components["schemas"]["Id"];
             /** @description Numero progressivo del SAL nel computo. */
             number: number;
@@ -3772,6 +9171,12 @@ export interface components {
             previous_amount: components["schemas"]["SignedAmount"];
             /** @description Importo maturato a tutto questo SAL. */
             cumulative_amount: components["schemas"]["SignedAmount"];
+            /** @description Ritenuta di garanzia in percentuale, con due decimali (es. "5.00"). */
+            retention_percent: string;
+            /** @description Ritenuta su questo SAL, amount × percentuale, arrotondata al centesimo. */
+            retention_amount: components["schemas"]["SignedAmount"];
+            /** @description Importo netto di questo SAL, amount meno la ritenuta. */
+            net_amount: components["schemas"]["SignedAmount"];
             /** Format: date-time */
             approved_at: string | null;
             /** Format: date-time */
@@ -3802,6 +9207,64 @@ export interface components {
         ProgressStatementList: {
             data: components["schemas"]["ProgressStatementSummary"][];
         };
+        CompanyProgressStatementList: {
+            data: (components["schemas"]["ProgressStatementSummary"] & {
+                estimate: {
+                    id: components["schemas"]["Id"];
+                    title: string;
+                };
+                /** @description Il cantiere del computo, o null. */
+                site: {
+                    id: components["schemas"]["Id"];
+                    name: string;
+                    code: string | null;
+                    /** @description CIG dell'appalto, letto dal cantiere. */
+                    cig: string | null;
+                    /** @description CUP dell'appalto, letto dal cantiere. */
+                    cup: string | null;
+                } | null;
+            })[];
+            meta: components["schemas"]["ListMeta"];
+            /** @description Somma degli importi dei SAL filtrati. */
+            total_amount: components["schemas"]["SignedAmount"];
+            /** @description Somma degli importi netti (dopo la ritenuta di garanzia) dei SAL filtrati. */
+            total_net_amount: components["schemas"]["SignedAmount"];
+        };
+        SiteCostTotal: {
+            site: {
+                id: components["schemas"]["Id"];
+                name: string;
+                code: string | null;
+                /** @description CIG del cantiere (vedi Site), per i lavori pubblici. */
+                cig: string | null;
+                /** @description CUP del cantiere (vedi Site), per i lavori pubblici. */
+                cup: string | null;
+                status: components["schemas"]["SiteStatus"];
+            };
+            /** @description Manodopera dai rapportini approvati. */
+            labor: components["schemas"]["Amount"];
+            /** @description Mezzi dai rapportini approvati. */
+            vehicles: components["schemas"]["Amount"];
+            /** @description Costi inseriti a mano (materiali, noli, subappalti e altro). */
+            manual: components["schemas"]["Amount"];
+            total: components["schemas"]["Amount"];
+            /** @description Parte del totale con data dentro filter[from] e filter[to]; null senza periodo. */
+            period_total: components["schemas"]["Amount"] | null;
+            budget: components["schemas"]["Amount"] | null;
+            /** @description Budget meno totale; negativo sopra budget, null senza budget. */
+            budget_remaining: components["schemas"]["SignedAmount"] | null;
+            over_budget: boolean;
+        };
+        SiteCostTotalList: {
+            data: components["schemas"]["SiteCostTotal"][];
+            meta: components["schemas"]["ListMeta"];
+            /** @description Somma dei costi di tutti i cantieri filtrati. */
+            total_amount: components["schemas"]["Amount"];
+            /** @description Somma di period_total dei cantieri filtrati; null senza periodo. */
+            period_total_amount: components["schemas"]["Amount"] | null;
+            /** @description Somma dei budget dei cantieri filtrati che ne hanno uno. */
+            budget_amount: components["schemas"]["Amount"];
+        };
         SiteCostList: {
             data: components["schemas"]["SiteCost"][];
             meta: components["schemas"]["ListMeta"];
@@ -3820,11 +9283,32 @@ export interface components {
             email: string | null;
             /** @description Data di assunzione. */
             hired_on: components["schemas"]["Date"] | null;
-            /** @description Costo orario aziendale, per il costo della manodopera nei cantieri. */
+            /**
+             * @description Costo orario aziendale, per il costo della manodopera nei cantieri. Cambiarlo non
+             *     cambia i rapportini già approvati, che tengono quello del giorno dell'approvazione.
+             *     È un costo: si vede e si cambia solo con costs.view. Senza costs.view arriva
+             *     sempre null (elenco, scheda, risposte di creazione e modifica), e quello che si
+             *     invia si ignora: alla modifica il costo orario resta quello che c'era, alla
+             *     creazione resta vuoto. Il form di chi non lo vede può quindi rimandare null senza
+             *     cancellarlo.
+             */
             hourly_cost: components["schemas"]["Amount"] | null;
             /** @description false per chi non lavora più in azienda; resta nello storico. */
             active: boolean;
             notes: string | null;
+            /**
+             * @description Giorni lavorativi di ferie spettanti in un anno, per le ferie residue di
+             *     getAbsenceTotals; null se non si tiene il conto. Facoltativo: se manca, alla
+             *     creazione vale null e alla modifica resta quello che c'era.
+             */
+            annual_leave_days?: number | null;
+            /**
+             * @description Ore di permesso spettanti in un anno (permessi retribuiti, ROL ed ex festività),
+             *     per i permessi residui di getAbsenceTotals; null se non si tiene il conto.
+             *     Facoltativo: se manca, alla creazione vale null e alla modifica resta quello che
+             *     c'era.
+             */
+            annual_permit_hours?: number | null;
         };
         Employee: components["schemas"]["EmployeeInput"] & {
             id: components["schemas"]["Id"];
@@ -3837,6 +9321,168 @@ export interface components {
             data: components["schemas"]["Employee"][];
             meta: components["schemas"]["ListMeta"];
         };
+        /**
+         * @description Somma di ore come stringa con il punto e due decimali.
+         * @example 164.50
+         */
+        WorkHours: string;
+        WorkSummary: {
+            hours: components["schemas"]["WorkHours"];
+            /** @description Giorni con ore, contando una volta un giorno su più cantieri. */
+            days: number;
+            /**
+             * @description Ore per costo orario fissato all'approvazione (attuale per i rapportini non
+             *     approvati), o null se nessuna riga ha un costo orario. Sempre null senza
+             *     costs.view.
+             */
+            cost: components["schemas"]["Amount"] | null;
+            sites: {
+                site: {
+                    id: components["schemas"]["Id"];
+                    name: string;
+                    code: string | null;
+                };
+                hours: components["schemas"]["WorkHours"];
+                days: number;
+                /** @description Come cost del totale; sempre null senza costs.view. */
+                cost: components["schemas"]["Amount"] | null;
+                first_date: components["schemas"]["Date"];
+                last_date: components["schemas"]["Date"];
+            }[];
+        };
+        VehicleWorkSummary: components["schemas"]["WorkSummary"] & {
+            /**
+             * @description Rifornimenti del periodo (refueled_on tra filter[from] e filter[to]): quanti
+             *     sono, i litri e la spesa senza IVA, con il consumo medio calcolato da pieno a
+             *     pieno sui rifornimenti del periodo con il contachilometri o contaore.
+             */
+            fuel: {
+                count: number;
+                /** @example 1234.50 */
+                liters: string;
+                amount: components["schemas"]["SignedAmount"];
+                /**
+                 * @description Chilometri (automezzi) o ore motore (macchine operatrici e attrezzature) fatti
+                 *     nel periodo: differenza tra il contachilometri più alto e il più basso dei
+                 *     rifornimenti del periodo che lo hanno. null se ce n'è meno di due.
+                 */
+                meter_distance: number | null;
+                /**
+                 * @description Consumo medio da pieno a pieno: litri dei rifornimenti con il contachilometri,
+                 *     tranne quello con il contachilometri più basso, divisi per meter_distance.
+                 *     Per gli automezzi in litri ogni 100 km, per macchine operatrici e attrezzature
+                 *     in litri all'ora, con due decimali e il punto. null se meter_distance è null
+                 *     o zero.
+                 * @example 8.75
+                 */
+                consumption: string | null;
+            };
+            /**
+             * @description Manutenzioni del periodo (performed_on tra filter[from] e filter[to]): quante
+             *     sono e la spesa senza IVA, quelle senza importo contano zero.
+             */
+            maintenance: {
+                count: number;
+                amount: components["schemas"]["SignedAmount"];
+            };
+        };
+        EmployeeWorkSummary: components["schemas"]["WorkSummary"] & {
+            /**
+             * @description Voci delle buste paga dai rapportini del periodo, con gli stessi filtri delle ore
+             *     (anche filter[status]), di tutti i cantieri. overtime_hours: somma di
+             *     overtime_hours, già comprese in hours; travel_days: giorni con travel, un giorno
+             *     su due cantieri conta una volta; weather_hours: somma di weather_hours, anche
+             *     dalle giornate perse tutte (non comprese in hours né in days); holiday_hours: ore
+             *     lavorate di domenica, nei festivi nazionali (Pasquetta compresa) e nel santo
+             *     patrono dei dati dell'azienda, già comprese in hours.
+             */
+            payroll: {
+                overtime_hours: components["schemas"]["WorkHours"];
+                travel_days: number;
+                weather_hours: components["schemas"]["WorkHours"];
+                holiday_hours: components["schemas"]["WorkHours"];
+            };
+            /**
+             * @description Assenze del periodo. days: giorni di calendario delle assenze di tutto il giorno
+             *     (un'assenza a cavallo del periodo conta solo i suoi giorni dentro); hours: ore
+             *     dei permessi. kinds: solo i tipi con almeno un'assenza, nell'ordine di
+             *     EmployeeAbsenceKind.
+             */
+            absences: {
+                days: number;
+                hours: components["schemas"]["WorkHours"];
+                kinds: {
+                    kind: components["schemas"]["EmployeeAbsenceKind"];
+                    days: number;
+                    hours: components["schemas"]["WorkHours"];
+                }[];
+            };
+        };
+        SiteWorkSummary: {
+            labor: {
+                hours: components["schemas"]["WorkHours"];
+                /** @description Di cui straordinario sul cantiere, somma delle righe. */
+                overtime_hours: components["schemas"]["WorkHours"];
+                /**
+                 * @description Giorni di trasferta sul cantiere, somma delle righe: due dipendenti in trasferta
+                 *     lo stesso giorno contano due.
+                 */
+                travel_days: number;
+                /** @description Ore perse per maltempo sul cantiere, somma delle righe. */
+                weather_hours: components["schemas"]["WorkHours"];
+                /** @description Di cui festive sul cantiere, somma delle righe. */
+                holiday_hours: components["schemas"]["WorkHours"];
+                cost: components["schemas"]["NullableWorkCost"];
+                rows: {
+                    employee: {
+                        id: components["schemas"]["Id"];
+                        first_name: string;
+                        last_name: string;
+                    };
+                    hours: components["schemas"]["WorkHours"];
+                    days: number;
+                    /** @description Di cui straordinario, somma di overtime_hours sul cantiere. */
+                    overtime_hours: components["schemas"]["WorkHours"];
+                    /** @description Giorni con travel sul cantiere, tra quelli con ore. */
+                    travel_days: number;
+                    /**
+                     * @description Ore perse per maltempo sul cantiere (non comprese nelle ore), anche dalle
+                     *     giornate perse tutte.
+                     */
+                    weather_hours: components["schemas"]["WorkHours"];
+                    /**
+                     * @description Di cui festive: ore lavorate sul cantiere di domenica, nei festivi nazionali
+                     *     (Pasquetta compresa) e nel santo patrono dei dati dell'azienda.
+                     */
+                    holiday_hours: components["schemas"]["WorkHours"];
+                    cost: components["schemas"]["NullableWorkCost"];
+                    first_date: components["schemas"]["Date"];
+                    last_date: components["schemas"]["Date"];
+                }[];
+            };
+            vehicles: {
+                hours: components["schemas"]["WorkHours"];
+                cost: components["schemas"]["NullableWorkCost"];
+                rows: {
+                    vehicle: {
+                        id: components["schemas"]["Id"];
+                        name: string;
+                        plate: string | null;
+                    };
+                    hours: components["schemas"]["WorkHours"];
+                    days: number;
+                    cost: components["schemas"]["NullableWorkCost"];
+                    first_date: components["schemas"]["Date"];
+                    last_date: components["schemas"]["Date"];
+                }[];
+            };
+        };
+        /**
+         * @description Ore per costo orario fissato all'approvazione (attuale per i rapportini non approvati).
+         *     Null senza costs.view; nei totali le ore senza costo
+         *     orario valgono zero, nelle righe il costo è null se il costo orario manca.
+         */
+        NullableWorkCost: components["schemas"]["Amount"] | null;
         /**
          * @description vehicle: automezzo (furgone, autocarro). machine: macchina operatrice (escavatore, gru).
          *     equipment: attrezzatura (betoniera, ponteggio, generatore).
@@ -3851,7 +9497,13 @@ export interface components {
             plate: string | null;
             /** @description Marca e modello. */
             model: string | null;
-            /** @description Costo orario del mezzo, per i costi dei cantieri. */
+            /**
+             * @description Costo orario del mezzo, per i costi dei cantieri. Cambiarlo non cambia i rapportini
+             *     già approvati, che tengono quello del giorno dell'approvazione. Come per i
+             *     dipendenti, si vede e si cambia solo con costs.view: senza, arriva sempre null e
+             *     quello che si invia si ignora (alla modifica resta quello che c'era, alla creazione
+             *     resta vuoto).
+             */
             hourly_cost: components["schemas"]["Amount"] | null;
             /** @description false per un mezzo venduto o dismesso; resta nello storico. */
             active: boolean;
@@ -3859,17 +9511,45 @@ export interface components {
         };
         Vehicle: components["schemas"]["VehicleInput"] & {
             id: components["schemas"]["Id"];
+            /**
+             * @description Rifornimento più recente del mezzo (data più recente; a parità, l'ultimo
+             *     registrato), null se non ce ne sono. Solo lettura: si ignora se inviato, e
+             *     registrare un rifornimento non cambia l'ETag del mezzo.
+             */
+            last_refueling: components["schemas"]["VehicleLastRefueling"] | null;
+            /**
+             * @description Intervento più recente del mezzo (data più recente; a parità, l'ultimo
+             *     registrato), null se non ce ne sono. Solo lettura: si ignora se inviato, e
+             *     registrare un intervento non cambia l'ETag del mezzo.
+             */
+            last_maintenance: components["schemas"]["VehicleLastMaintenance"] | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        VehicleLastRefueling: {
+            id: components["schemas"]["Id"];
+            refueled_on: components["schemas"]["Date"];
+            liters: components["schemas"]["Liters"];
+            /** @description Contachilometri o contaore registrato in quel rifornimento. */
+            meter_reading: number | null;
+        };
+        VehicleLastMaintenance: {
+            id: components["schemas"]["Id"];
+            performed_on: components["schemas"]["Date"];
+            kind: components["schemas"]["VehicleMaintenanceKind"];
+            /** @description Contachilometri o contaore registrato in quell'intervento. */
+            meter_reading: number | null;
+            /** @description Prossima manutenzione indicata in quell'intervento, se c'è. */
+            next_due_on: components["schemas"]["Date"] | null;
         };
         VehicleList: {
             data: components["schemas"]["Vehicle"][];
             meta: components["schemas"]["ListMeta"];
         };
         /**
-         * @description draft: bozza. final: definitivo.
+         * @description draft: bozza. final: definitivo: capitoli, voci e righe di misura non si modificano più (409 estimate_final) finché il computo non torna in bozza; la testata resta modificabile, stato compreso.
          * @enum {string}
          */
         EstimateStatus: "draft" | "final";
@@ -3890,6 +9570,10 @@ export interface components {
                 id: components["schemas"]["Id"];
                 name: string;
                 code: string | null;
+                /** @description CIG del cantiere (vedi Site), per i lavori pubblici. */
+                cig: string | null;
+                /** @description CUP del cantiere (vedi Site), per i lavori pubblici. */
+                cup: string | null;
             } | null;
             /** @description Totale del computo, somma degli importi delle voci. */
             total: components["schemas"]["SignedAmount"];
@@ -3995,6 +9679,10 @@ export interface components {
                 id: components["schemas"]["Id"];
                 chapter_id: components["schemas"]["Id"];
             }[];
+            measurements?: {
+                id: components["schemas"]["Id"];
+                item_id: components["schemas"]["Id"];
+            }[];
         };
         /**
          * @description Dati fiscali dell'azienda. Per le aziende italiane si controllano partita IVA, codice
@@ -4019,6 +9707,13 @@ export interface components {
             pec: string | null;
             /** @description Conto per i pagamenti, stampato nelle condizioni. Gli spazi si tolgono. */
             iban: string | null;
+            /**
+             * @description Giorno del santo patrono del comune dove l'azienda lavora, come MM-GG (mai 02-29).
+             *     Facoltativo: se manca resta com'era, null lo toglie. Si toglie dai giorni lavorativi
+             *     delle assenze (working_days) come le festività nazionali.
+             * @example 06-29
+             */
+            patron_saint_day?: string | null;
         };
         CompanyProfile: components["schemas"]["CompanyProfileInput"] & {
             /**
@@ -4026,20 +9721,52 @@ export interface components {
              * @description Null se i dati non sono mai stati salvati.
              */
             updated_at: string | null;
-        };
-        Numbering: {
-            quotes: {
-                year: number;
-                next_number: number;
-                /** @description Il prossimo numero come verrà stampato, ad esempio 2026/046. */
-                next: string;
+            /**
+             * @description Solo lettura: lo spazio occupato dai file dell'azienda (documenti e foto dei
+             *     cantieri, file dei documenti e delle fatture, logo) e il limite oltre il quale
+             *     i caricamenti rispondono 413 con code storage_full, in byte. Non cambia l'ETag.
+             */
+            storage: {
+                used_bytes: number;
+                limit_bytes: number;
             };
         };
+        Numbering: {
+            quotes: components["schemas"]["NumberingSeries"];
+            purchase_orders: components["schemas"]["NumberingSeries"];
+        };
+        NumberingSeries: {
+            year: number;
+            next_number: number;
+            /** @description Il prossimo numero come verrà stampato, ad esempio 2026/046. */
+            next: string;
+        };
+        /**
+         * @description Ordini ai fornitori da seguire, gli stessi contati nella sezione purchase_orders di
+         *     getDashboard. awaiting: inviati e non ancora ricevuti. late: in attesa, con la consegna
+         *     prevista (delivery_date) già passata. due_soon: in attesa, con la consegna prevista
+         *     entro 7 giorni da oggi, oggi compreso.
+         * @enum {string}
+         */
+        PurchaseOrderFollowUp: "awaiting" | "late" | "due_soon";
+        /**
+         * @description Preventivi da seguire, gli stessi contati nella sezione quotes di getDashboard.
+         *     awaiting: inviati e non sostituiti da una revisione già inviata. expiring: in attesa,
+         *     con la validità (valid_until) che finisce entro 7 giorni da oggi, oggi compreso.
+         *     past_validity: in attesa, con la validità già finita. accepted_without_site: accettati
+         *     senza un cantiere creato dal preventivo.
+         * @enum {string}
+         */
+        QuoteFollowUp: "awaiting" | "expiring" | "past_validity" | "accepted_without_site";
         /**
          * @description draft: bozza. sent: inviato. accepted: accettato. rejected: rifiutato. expired: scaduto.
          * @enum {string}
          */
         QuoteStatus: "draft" | "sent" | "accepted" | "rejected" | "expired";
+        QuoteDuplicateInput: {
+            /** @description Il cliente della copia; null per lo stesso del preventivo di partenza. */
+            client_id: components["schemas"]["Id"] | null;
+        };
         /** @description I campi facoltativi si inviano comunque, con null se vuoti. */
         QuoteInput: {
             client_id: components["schemas"]["Id"];
@@ -4053,6 +9780,8 @@ export interface components {
         };
         Quote: components["schemas"]["QuoteInput"] & {
             id: components["schemas"]["Id"];
+            /** @description Il cantiere creato da questo preventivo (createSiteFromQuote), o null. */
+            site_id: components["schemas"]["Id"] | null;
             totals: components["schemas"]["QuoteTotals"];
             client: components["schemas"]["SubjectRef"];
             status: components["schemas"]["QuoteStatus"];
@@ -4095,8 +9824,16 @@ export interface components {
          */
         VatRate: 22 | 10 | 5 | 4 | 0;
         /**
+         * @description Natura di un'operazione ad aliquota 0, con i codici della fattura elettronica. Per
+         *     l'edilizia: N6.3 (subappalto) e N6.7 (prestazioni del comparto edile), inversione
+         *     contabile dell'art. 17, c. 6, DPR 633/72.
+         * @enum {string}
+         */
+        VatNature: "N1" | "N2.1" | "N2.2" | "N3.1" | "N3.2" | "N3.3" | "N3.4" | "N3.5" | "N3.6" | "N4" | "N5" | "N6.1" | "N6.2" | "N6.3" | "N6.4" | "N6.5" | "N6.6" | "N6.7" | "N6.8" | "N6.9" | "N7";
+        /**
          * @description Per le righe item servono unit, quantity, unit_price, discount_percent e vat_rate; per
-         *     text e section vanno inviati null. I campi si inviano sempre tutti.
+         *     text e section vanno inviati null. I campi si inviano sempre tutti, tranne vat_nature:
+         *     facoltativa, solo per le righe item con aliquota 0 (assente vuol dire null).
          */
         QuoteLineInput: {
             kind: components["schemas"]["QuoteLineKind"];
@@ -4107,6 +9844,8 @@ export interface components {
             /** @description Sconto in percentuale, da 0 a 100, fino a due decimali. */
             discount_percent: string | null;
             vat_rate: components["schemas"]["VatRate"] | null;
+            /** @description Natura IVA della riga con aliquota 0 (es. N6.7, inversione contabile). */
+            vat_nature?: components["schemas"]["VatNature"] | null;
         };
         QuoteLine: components["schemas"]["QuoteLineInput"] & {
             id: components["schemas"]["Id"];
@@ -4119,6 +9858,10 @@ export interface components {
             /** @description Lo stesso valore dell'ETag, da rimandare in If-Match. */
             version: string;
         };
+        QuoteLineArrangement: {
+            /** @description Gli id di tutte le righe del preventivo, nel nuovo ordine. */
+            lines: components["schemas"]["Id"][];
+        };
         QuoteLineList: {
             data: components["schemas"]["QuoteLine"][];
         };
@@ -4129,9 +9872,13 @@ export interface components {
          */
         QuoteTotals: {
             taxable: components["schemas"]["SignedAmount"];
-            /** @description Una voce per aliquota presente nelle righe, dalla più alta. */
+            /**
+             * @description Una voce per aliquota e natura presenti nelle righe, dall'aliquota più alta; a
+             *     parità di aliquota prima quella senza natura, poi le nature in ordine di codice.
+             */
             vat: {
                 rate: components["schemas"]["VatRate"];
+                nature: components["schemas"]["VatNature"] | null;
                 taxable: components["schemas"]["SignedAmount"];
                 vat: components["schemas"]["SignedAmount"];
             }[];
@@ -4140,6 +9887,8 @@ export interface components {
         };
         QuoteFromEstimateInput: components["schemas"]["QuoteInput"] & {
             vat_rate: components["schemas"]["VatRate"];
+            /** @description Facoltativa, solo con vat_rate 0; vale per tutte le voci. */
+            vat_nature?: components["schemas"]["VatNature"] | null;
         };
     };
     responses: {
@@ -4184,7 +9933,8 @@ export interface components {
         };
         /**
          * @description Il record è stato modificato da qualcun altro dopo che l'utente l'ha aperto
-         *     (code stale_record). Niente viene cambiato.
+         *     (code stale_record). Niente viene cambiato. Viene prima del 422: il corpo non si
+         *     controlla.
          */
         StaleRecord: {
             headers: {
@@ -4229,6 +9979,29 @@ export interface components {
         };
     };
     parameters: {
+        /**
+         * @description Giacenza, costo medio, valore e scorta minima a fine giornata di questa data, con i soli
+         *     movimenti fino a quel giorno compreso: ad esempio le rimanenze al 31 dicembre. Senza,
+         *     contano tutti i movimenti.
+         */
+        WarehouseAsOf: components["schemas"]["Date"];
+        /**
+         * @description Filtri, ad esempio filter[employee]=<id>, filter[vacation]=exceeded oppure
+         *     filter[permit]=exceeded; insieme valgono tutti.
+         */
+        AbsenceTotalsFilter: {
+            employee?: components["schemas"]["Id"];
+            /**
+             * @description exceeded tiene solo chi ha fatto più ferie di quelle spettanti e riportate.
+             * @enum {string}
+             */
+            vacation?: "exceeded";
+            /**
+             * @description exceeded tiene solo chi ha permit_remaining sotto zero.
+             * @enum {string}
+             */
+            permit?: "exceeded";
+        };
         /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
         Company: components["schemas"]["Slug"];
         Page: number;
@@ -4241,9 +10014,11 @@ export interface components {
         PriceListItemId: components["schemas"]["Id"];
         SiteActivityId: components["schemas"]["Id"];
         ProgressStatementId: components["schemas"]["Id"];
+        SupplierDocumentId: components["schemas"]["Id"];
         SiteDocumentId: components["schemas"]["Id"];
         WarehouseItemId: components["schemas"]["Id"];
         WarehouseMovementId: components["schemas"]["Id"];
+        InvoiceId: components["schemas"]["Id"];
         PurchaseOrderId: components["schemas"]["Id"];
         SiteCostId: components["schemas"]["Id"];
         DailyReportId: components["schemas"]["Id"];
@@ -4257,14 +10032,26 @@ export interface components {
         LineId: components["schemas"]["Id"];
         UserId: components["schemas"]["Id"];
         InvitationToken: string;
-        /** @description ETag della versione che l'utente ha davanti. */
+        /**
+         * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+         *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+         *     versione superata la risposta è 412 anche se il corpo non è valido.
+         */
         IfMatch: string;
         /** @description Testo libero; il backend decide su quali campi cercare. */
         Search: string;
+        /** @description Filtri, ad esempio filter[below_min]=true. */
+        WarehouseItemFilter: {
+            /** @description true per i soli articoli sotto la scorta minima, false per gli altri. */
+            below_min?: boolean;
+        };
     };
     requestBodies: never;
     headers: {
-        /** @description Versione del record, da rimandare in If-Match quando lo si modifica. */
+        /**
+         * @description Versione del record, da rimandare in If-Match quando lo si modifica. ETag forte: un
+         *     numero tra virgolette, ad esempio "7".
+         */
         ETag: string;
     };
     pathItems: never;
@@ -4368,6 +10155,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationFailed"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     resetPassword: {
@@ -4395,6 +10183,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationFailed"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     logout: {
@@ -4491,6 +10280,146 @@ export interface operations {
             429: components["responses"]["TooManyRequests"];
         };
     };
+    requestEmailChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailChangeInput"];
+            };
+        };
+        responses: {
+            /** @description Link di conferma inviato al nuovo indirizzo */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationFailed"];
+            429: components["responses"]["TooManyRequests"];
+            /** @description Il messaggio con il link non è partito (code email_not_sent). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    confirmEmailChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Email cambiata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description L'indirizzo è già di un altro account (code email_in_use). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    listMySessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gli accessi */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MySessionList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    closeOtherSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Altri accessi chiusi */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    closeMySession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accesso chiuso */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description È la sessione da cui arriva la richiesta (code current_session). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listClients: {
         parameters: {
             query?: {
@@ -4558,6 +10487,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Client"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    importClients: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example nome;partita iva;città
+                 *     Edil Esempio S.r.l.;01234567897;Bergamo
+                 */
+                "text/csv": string;
+            };
+        };
+        responses: {
+            /** @description Clienti importati */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Clienti aggiunti. */
+                        created: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File più grande di 5 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Il corpo non è un file CSV (Content-Type text/csv). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listClientBalances: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                filter?: {
+                    /** @description true per avere solo chi ha qualcosa di scaduto. */
+                    overdue?: boolean;
+                    /**
+                     * @description Testo nel nome, nella partita IVA o nel codice fiscale, senza distinguere
+                     *     maiuscole e minuscole e senza caratteri jolly; un testo di soli spazi è
+                     *     ignorato. Le somme in fondo sono quelle dei soli soggetti trovati.
+                     */
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di clienti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectBalanceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportClientBalances: {
+        parameters: {
+            query?: {
+                filter?: {
+                    /** @description true per avere solo chi ha qualcosa di scaduto. */
+                    overdue?: boolean;
+                    /**
+                     * @description Testo nel nome, nella partita IVA o nel codice fiscale, senza distinguere
+                     *     maiuscole e minuscole e senza caratteri jolly; un testo di soli spazi è
+                     *     ignorato. Le somme in fondo sono quelle dei soli soggetti trovati.
+                     */
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -4689,7 +10754,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -4728,7 +10797,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -4761,7 +10834,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -4790,6 +10867,118 @@ export interface operations {
             428: components["responses"]["PreconditionRequired"];
         };
     };
+    getClientAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description L'estratto conto */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectAccount"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getClientAccountPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il PDF */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listClientSites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I cantieri del cliente */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientSiteList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    exportClientSites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                client: components["parameters"]["ClientId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listSuppliers: {
         parameters: {
             query?: {
@@ -4809,6 +10998,19 @@ export interface operations {
                     subcontractor?: boolean;
                     /** @default false */
                     archived?: boolean;
+                    /**
+                     * @description Regolarità dai documenti del fornitore (DURC, visura, assicurazione, patente, altro),
+                     *     guardando per ogni tipo solo la scadenza più lontana: un DURC vecchio scaduto
+                     *     non conta se ce n'è uno nuovo. expired: almeno un tipo scaduto. expiring:
+                     *     nessuno scaduto, almeno uno che scade entro 30 giorni da oggi, oggi compreso.
+                     *     no_valid_durc: nessun DURC valido oggi (mai caricato o scaduto), di solito con
+                     *     filter[subcontractor]=true.
+                     *     no_valid_credit_license: nessuna patente a crediti valida oggi (mai caricata o
+                     *     scaduta; senza data di scadenza è valida), di solito con
+                     *     filter[subcontractor]=true.
+                     * @enum {string}
+                     */
+                    compliance?: "expired" | "expiring" | "no_valid_durc" | "no_valid_credit_license";
                 };
             };
             header?: never;
@@ -4867,6 +11069,142 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    importSuppliers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example nome;partita iva;categorie;subappaltatore
+                 *     Ferro Esempio S.r.l.;01234567897;Materiali, Noli;No
+                 */
+                "text/csv": string;
+            };
+        };
+        responses: {
+            /** @description Fornitori importati */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Fornitori aggiunti. */
+                        created: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File più grande di 5 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Il corpo non è un file CSV (Content-Type text/csv). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listSupplierBalances: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                filter?: {
+                    /** @description true per avere solo chi ha qualcosa di scaduto. */
+                    overdue?: boolean;
+                    /**
+                     * @description Testo nel nome, nella partita IVA o nel codice fiscale, senza distinguere
+                     *     maiuscole e minuscole e senza caratteri jolly; un testo di soli spazi è
+                     *     ignorato. Le somme in fondo sono quelle dei soli soggetti trovati.
+                     */
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di fornitori */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectBalanceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportSupplierBalances: {
+        parameters: {
+            query?: {
+                filter?: {
+                    /** @description true per avere solo chi ha qualcosa di scaduto. */
+                    overdue?: boolean;
+                    /**
+                     * @description Testo nel nome, nella partita IVA o nel codice fiscale, senza distinguere
+                     *     maiuscole e minuscole e senza caratteri jolly; un testo di soli spazi è
+                     *     ignorato. Le somme in fondo sono quelle dei soli soggetti trovati.
+                     */
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     exportSuppliers: {
         parameters: {
             query?: {
@@ -4878,6 +11216,19 @@ export interface operations {
                     subcontractor?: boolean;
                     /** @default false */
                     archived?: boolean;
+                    /**
+                     * @description Regolarità dai documenti del fornitore (DURC, visura, assicurazione, patente, altro),
+                     *     guardando per ogni tipo solo la scadenza più lontana: un DURC vecchio scaduto
+                     *     non conta se ce n'è uno nuovo. expired: almeno un tipo scaduto. expiring:
+                     *     nessuno scaduto, almeno uno che scade entro 30 giorni da oggi, oggi compreso.
+                     *     no_valid_durc: nessun DURC valido oggi (mai caricato o scaduto), di solito con
+                     *     filter[subcontractor]=true.
+                     *     no_valid_credit_license: nessuna patente a crediti valida oggi (mai caricata o
+                     *     scaduta; senza data di scadenza è valida), di solito con
+                     *     filter[subcontractor]=true.
+                     * @enum {string}
+                     */
+                    compliance?: "expired" | "expiring" | "no_valid_durc" | "no_valid_credit_license";
                 };
             };
             header?: never;
@@ -4937,7 +11288,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -4975,7 +11330,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5014,7 +11373,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5047,7 +11410,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5074,6 +11441,118 @@ export interface operations {
             404: components["responses"]["NotFound"];
             412: components["responses"]["StaleRecord"];
             428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getSupplierAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description L'estratto conto */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectAccount"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getSupplierAccountPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il PDF */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listSupplierSites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I cantieri del fornitore */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierSiteList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    exportSupplierSites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listSupplierDocuments: {
@@ -5139,7 +11618,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5178,7 +11661,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5205,6 +11692,144 @@ export interface operations {
             428: components["responses"]["PreconditionRequired"];
         };
     };
+    getSupplierDocumentFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+                document: components["parameters"]["SupplierDocumentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setSupplierDocumentFile: {
+        parameters: {
+            query: {
+                /** @description Nome originale del file; si tiene solo l'ultima parte del percorso. */
+                file_name: string;
+            };
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+                document: components["parameters"]["SupplierDocumentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/pdf": string;
+                "image/jpeg": string;
+                "image/png": string;
+            };
+        };
+        responses: {
+            /** @description File salvato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            /**
+             * @description File più grande di 20 MB, oppure spazio per i file dell'azienda esaurito (code
+             *     storage_full, vedi le regole comuni).
+             */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tipo di file non ammesso. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteSupplierDocumentFile: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                supplier: components["parameters"]["SupplierId"];
+                document: components["parameters"]["SupplierDocumentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File eliminato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
     listDeadlines: {
         parameters: {
             query?: {
@@ -5216,7 +11841,8 @@ export interface operations {
                 sort?: "due_on" | "-due_on";
                 /**
                  * @description Filtri, ad esempio filter[from]=2026-11-01&filter[to]=2026-11-30&filter[status]=open.
-                 *     filter[client] e filter[supplier] prendono l'id del soggetto.
+                 *     filter[client], filter[supplier], filter[site], filter[employee] e filter[vehicle]
+                 *     prendono l'id del soggetto, del cantiere, del dipendente o del mezzo.
                  */
                 filter?: {
                     from?: components["schemas"]["Date"];
@@ -5225,6 +11851,9 @@ export interface operations {
                     status?: components["schemas"]["DeadlineStatus"];
                     client?: components["schemas"]["Id"];
                     supplier?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                    employee?: components["schemas"]["Id"];
+                    vehicle?: components["schemas"]["Id"];
                 };
             };
             header?: never;
@@ -5296,6 +11925,9 @@ export interface operations {
                     status?: components["schemas"]["DeadlineStatus"];
                     client?: components["schemas"]["Id"];
                     supplier?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                    employee?: components["schemas"]["Id"];
+                    vehicle?: components["schemas"]["Id"];
                 };
             };
             header?: never;
@@ -5316,6 +11948,49 @@ export interface operations {
                 };
                 content: {
                     "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportDeadlinesCalendar: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    kind?: components["schemas"]["DeadlineKind"];
+                    status?: components["schemas"]["DeadlineStatus"];
+                    client?: components["schemas"]["Id"];
+                    supplier?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                    employee?: components["schemas"]["Id"];
+                    vehicle?: components["schemas"]["Id"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file iCalendar */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/calendar": string;
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -5381,7 +12056,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5419,7 +12098,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5449,7 +12132,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5482,7 +12169,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5519,11 +12210,112 @@ export interface operations {
                 /** @description Testo libero; il backend decide su quali campi cercare. */
                 search?: components["parameters"]["Search"];
                 /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
-                sort?: "name" | "-name" | "code" | "-code" | "start_on" | "-start_on" | "updated_at" | "-updated_at";
+                sort?: "name" | "-name" | "code" | "-code" | "start_on" | "-start_on" | "updated_at" | "-updated_at" | "last_report_on" | "-last_report_on";
                 /** @description Filtri, ad esempio filter[status]=active o filter[client]=<id>. */
                 filter?: {
                     status?: components["schemas"]["SiteStatus"];
                     client?: components["schemas"]["Id"];
+                    /**
+                     * @description true: cantieri attivi senza un rapportino (in qualunque stato) con la data di
+                     *     oggi, gli stessi contati in reports.missing_today di getDashboard. false:
+                     *     cantieri attivi che il rapportino di oggi ce l'hanno.
+                     */
+                    report_missing?: boolean;
+                    /**
+                     * @description Cantieri con almeno un subappaltatore (con un costo o un ordine sul cantiere,
+                     *     anche archiviato) nella condizione indicata, come filter[compliance] dei
+                     *     fornitori e listSiteSubcontractors. Serve anche suppliers.view, altrimenti 403.
+                     * @enum {string}
+                     */
+                    subcontractor_compliance?: "expired" | "expiring" | "no_valid_durc" | "no_valid_credit_license";
+                    /**
+                     * @description Cantieri con almeno un dipendente della squadra (getSiteTeam) con un documento
+                     *     nella condizione indicata, come filter[documents] dei dipendenti. expired basta
+                     *     sites.view, come documents_expired della squadra; expiring vuole anche
+                     *     employees.view, altrimenti 403.
+                     * @enum {string}
+                     */
+                    team_documents?: "expired" | "expiring";
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza la data della
+                     *     notifica preliminare (prior_notice_on), gli stessi contati in
+                     *     sites.without_prior_notice di getDashboard. false: cantieri, in qualunque
+                     *     stato, con la data della notifica preliminare.
+                     */
+                    prior_notice_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il titolo edilizio
+                     *     (permit), gli stessi contati in sites.without_permit di getDashboard. false:
+                     *     cantieri, in qualunque stato, con il titolo edilizio.
+                     */
+                    permit_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il coordinatore per
+                     *     la sicurezza in esecuzione (safety_coordinator), gli stessi contati in
+                     *     sites.without_safety_coordinator di getDashboard. false: cantieri, in qualunque
+                     *     stato, con il coordinatore.
+                     */
+                    safety_coordinator_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il direttore dei
+                     *     lavori (works_director), gli stessi contati in sites.without_works_director di
+                     *     getDashboard. false: cantieri, in qualunque stato, con il direttore dei lavori.
+                     */
+                    works_director_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il budget, gli
+                     *     stessi contati in sites.without_budget di getDashboard: senza budget i costi
+                     *     non si confrontano e il cantiere non compare in over_budget. false: cantieri,
+                     *     in qualunque stato, con il budget (anche zero).
+                     */
+                    budget_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza la posizione
+                     *     (location), gli stessi contati in sites.without_location di getDashboard: senza
+                     *     posizione il cantiere non compare sulla mappa. false: cantieri, in qualunque
+                     *     stato, con la posizione.
+                     */
+                    location_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il cliente
+                     *     (client_id), gli stessi contati in sites.without_client di getDashboard: senza
+                     *     cliente il cantiere non si fattura. false: cantieri, in qualunque stato, con il
+                     *     cliente.
+                     */
+                    client_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) con la fine prevista
+                     *     (end_on) prima di oggi in Italia, gli stessi contati in sites.past_end di
+                     *     getDashboard. false: tutti gli altri (chiusi, senza fine prevista o con la
+                     *     fine da oggi in poi).
+                     */
+                    past_end?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) con la fine prevista
+                     *     (end_on) da oggi ai prossimi 14 giorni compresi, in Italia, gli stessi contati
+                     *     in sites.ending_soon di getDashboard. false: tutti gli altri (chiusi, senza
+                     *     fine prevista, con la fine già passata o più lontana).
+                     */
+                    ending_soon?: boolean;
+                    /**
+                     * @description true: cantieri attivi senza un rapportino (in qualunque stato) con la data
+                     *     negli ultimi 7 giorni, oggi compreso, in Italia, gli stessi contati in
+                     *     reports.missing_week di getDashboard. false: tutti gli altri.
+                     */
+                    without_recent_reports?: boolean;
+                    /**
+                     * @description true: cantieri ancora da iniziare (planned) con l'inizio previsto (start_on)
+                     *     da oggi in giù, in Italia, gli stessi contati in sites.start_due di
+                     *     getDashboard. false: tutti gli altri (in un altro stato, senza inizio previsto
+                     *     o con l'inizio da domani in poi).
+                     */
+                    start_due?: boolean;
+                    /**
+                     * @description true: cantieri da iniziare o in corso (planned, active) senza nessun dipendente
+                     *     in servizio nella squadra (getSiteTeam; gli ex dipendenti non contano), gli
+                     *     stessi contati in sites.without_team di getDashboard. false: tutti gli altri.
+                     */
+                    without_team?: boolean;
                 };
             };
             header?: never;
@@ -5587,10 +12379,111 @@ export interface operations {
             query?: {
                 /** @description Testo libero; il backend decide su quali campi cercare. */
                 search?: components["parameters"]["Search"];
-                sort?: "name" | "-name" | "code" | "-code" | "start_on" | "-start_on" | "updated_at" | "-updated_at";
+                sort?: "name" | "-name" | "code" | "-code" | "start_on" | "-start_on" | "updated_at" | "-updated_at" | "last_report_on" | "-last_report_on";
                 filter?: {
                     status?: components["schemas"]["SiteStatus"];
                     client?: components["schemas"]["Id"];
+                    /**
+                     * @description true: cantieri attivi senza un rapportino (in qualunque stato) con la data di
+                     *     oggi, gli stessi contati in reports.missing_today di getDashboard. false:
+                     *     cantieri attivi che il rapportino di oggi ce l'hanno.
+                     */
+                    report_missing?: boolean;
+                    /**
+                     * @description Cantieri con almeno un subappaltatore (con un costo o un ordine sul cantiere,
+                     *     anche archiviato) nella condizione indicata, come filter[compliance] dei
+                     *     fornitori e listSiteSubcontractors. Serve anche suppliers.view, altrimenti 403.
+                     * @enum {string}
+                     */
+                    subcontractor_compliance?: "expired" | "expiring" | "no_valid_durc" | "no_valid_credit_license";
+                    /**
+                     * @description Cantieri con almeno un dipendente della squadra (getSiteTeam) con un documento
+                     *     nella condizione indicata, come filter[documents] dei dipendenti. expired basta
+                     *     sites.view, come documents_expired della squadra; expiring vuole anche
+                     *     employees.view, altrimenti 403.
+                     * @enum {string}
+                     */
+                    team_documents?: "expired" | "expiring";
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza la data della
+                     *     notifica preliminare (prior_notice_on), gli stessi contati in
+                     *     sites.without_prior_notice di getDashboard. false: cantieri, in qualunque
+                     *     stato, con la data della notifica preliminare.
+                     */
+                    prior_notice_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il titolo edilizio
+                     *     (permit), gli stessi contati in sites.without_permit di getDashboard. false:
+                     *     cantieri, in qualunque stato, con il titolo edilizio.
+                     */
+                    permit_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il coordinatore per
+                     *     la sicurezza in esecuzione (safety_coordinator), gli stessi contati in
+                     *     sites.without_safety_coordinator di getDashboard. false: cantieri, in qualunque
+                     *     stato, con il coordinatore.
+                     */
+                    safety_coordinator_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il direttore dei
+                     *     lavori (works_director), gli stessi contati in sites.without_works_director di
+                     *     getDashboard. false: cantieri, in qualunque stato, con il direttore dei lavori.
+                     */
+                    works_director_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il budget, gli
+                     *     stessi contati in sites.without_budget di getDashboard: senza budget i costi
+                     *     non si confrontano e il cantiere non compare in over_budget. false: cantieri,
+                     *     in qualunque stato, con il budget (anche zero).
+                     */
+                    budget_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza la posizione
+                     *     (location), gli stessi contati in sites.without_location di getDashboard: senza
+                     *     posizione il cantiere non compare sulla mappa. false: cantieri, in qualunque
+                     *     stato, con la posizione.
+                     */
+                    location_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) senza il cliente
+                     *     (client_id), gli stessi contati in sites.without_client di getDashboard: senza
+                     *     cliente il cantiere non si fattura. false: cantieri, in qualunque stato, con il
+                     *     cliente.
+                     */
+                    client_missing?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) con la fine prevista
+                     *     (end_on) prima di oggi in Italia, gli stessi contati in sites.past_end di
+                     *     getDashboard. false: tutti gli altri (chiusi, senza fine prevista o con la
+                     *     fine da oggi in poi).
+                     */
+                    past_end?: boolean;
+                    /**
+                     * @description true: cantieri non chiusi (planned, active, suspended) con la fine prevista
+                     *     (end_on) da oggi ai prossimi 14 giorni compresi, in Italia, gli stessi contati
+                     *     in sites.ending_soon di getDashboard. false: tutti gli altri (chiusi, senza
+                     *     fine prevista, con la fine già passata o più lontana).
+                     */
+                    ending_soon?: boolean;
+                    /**
+                     * @description true: cantieri attivi senza un rapportino (in qualunque stato) con la data
+                     *     negli ultimi 7 giorni, oggi compreso, in Italia, gli stessi contati in
+                     *     reports.missing_week di getDashboard. false: tutti gli altri.
+                     */
+                    without_recent_reports?: boolean;
+                    /**
+                     * @description true: cantieri ancora da iniziare (planned) con l'inizio previsto (start_on)
+                     *     da oggi in giù, in Italia, gli stessi contati in sites.start_due di
+                     *     getDashboard. false: tutti gli altri (in un altro stato, senza inizio previsto
+                     *     o con l'inizio da domani in poi).
+                     */
+                    start_due?: boolean;
+                    /**
+                     * @description true: cantieri da iniziare o in corso (planned, active) senza nessun dipendente
+                     *     in servizio nella squadra (getSiteTeam; gli ex dipendenti non contano), gli
+                     *     stessi contati in sites.without_team di getDashboard. false: tutti gli altri.
+                     */
+                    without_team?: boolean;
                 };
             };
             header?: never;
@@ -5650,7 +12543,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5688,7 +12585,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5724,6 +12625,34 @@ export interface operations {
             };
             412: components["responses"]["StaleRecord"];
             428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getSiteSignPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il PDF */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     getSiteTeam: {
@@ -5784,6 +12713,91 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    exportSiteTeamDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listSiteSubcontractors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I subappaltatori del cantiere */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteSubcontractorList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    exportSiteSubcontractorDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listDailyReports: {
         parameters: {
             query?: {
@@ -5794,12 +12808,22 @@ export interface operations {
                 /**
                  * @description Filtri, ad esempio filter[site]=<id>, filter[status]=submitted,
                  *     filter[from]=2026-11-01 e filter[to]=2026-11-30 (estremi compresi).
+                 *     filter[employee]=<id> e filter[vehicle]=<id> tengono i rapportini con ore di quel
+                 *     dipendente o di quel mezzo, per le schede di dipendenti e mezzi. filter[q]=testo
+                 *     cerca nei lavori eseguiti e nelle note, senza distinguere maiuscole e minuscole.
                  */
                 filter?: {
                     site?: components["schemas"]["Id"];
+                    employee?: components["schemas"]["Id"];
+                    vehicle?: components["schemas"]["Id"];
                     status?: components["schemas"]["DailyReportStatus"];
                     from?: components["schemas"]["Date"];
                     to?: components["schemas"]["Date"];
+                    /**
+                     * @description Cerca nei lavori svolti e nelle note, e nel CIG e nel CUP del cantiere (anche
+                     *     in parte, in minuscolo o con gli spazi).
+                     */
+                    q?: string;
                 };
             };
             header?: never;
@@ -5863,6 +12887,7 @@ export interface operations {
             query: {
                 site: components["schemas"]["Id"];
                 date?: components["schemas"]["Date"];
+                copy_previous?: boolean;
             };
             header?: never;
             path: {
@@ -5880,6 +12905,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailyReportToday"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportDailyReports: {
+        parameters: {
+            query?: {
+                sort?: "date" | "-date" | "updated_at" | "-updated_at";
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    employee?: components["schemas"]["Id"];
+                    vehicle?: components["schemas"]["Id"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportMonthlyHours: {
+        parameters: {
+            query: {
+                /** @description Il mese, come 2026-11. */
+                month: string;
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportMonthlySiteHours: {
+        parameters: {
+            query: {
+                /** @description Il mese, come 2026-11. */
+                month: string;
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getWorkLogPdf: {
+        parameters: {
+            query: {
+                filter: {
+                    site: components["schemas"]["Id"];
+                    from: components["schemas"]["Date"];
+                    to: components["schemas"]["Date"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il PDF */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -5919,7 +13092,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -5966,7 +13143,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6001,11 +13182,43 @@ export interface operations {
             428: components["responses"]["PreconditionRequired"];
         };
     };
+    getDailyReportPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                report: components["parameters"]["DailyReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il PDF */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     changeDailyReportStatus: {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6059,7 +13272,9 @@ export interface operations {
                 sort?: "date" | "-date" | "amount" | "-amount";
                 /**
                  * @description Filtri, ad esempio filter[site]=<id>, filter[category]=materials,
-                 *     filter[supplier]=<id>, filter[from]=2026-11-01 e filter[to]=2026-11-30.
+                 *     filter[supplier]=<id>, filter[from]=2026-11-01 e filter[to]=2026-11-30 e
+                 *     filter[q]=testo (nella descrizione e nelle note, senza distinguere maiuscole e
+                 *     minuscole, e nel CIG e nel CUP del cantiere, anche in parte o con gli spazi).
                  */
                 filter?: {
                     site?: components["schemas"]["Id"];
@@ -6067,6 +13282,7 @@ export interface operations {
                     category?: components["schemas"]["CostCategory"];
                     from?: components["schemas"]["Date"];
                     to?: components["schemas"]["Date"];
+                    q?: string;
                 };
             };
             header?: never;
@@ -6125,6 +13341,128 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    listSiteCostTotals: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "name" | "-name" | "total" | "-total" | "period_total" | "-period_total" | "remaining" | "-remaining";
+                /**
+                 * @description Filtri, ad esempio filter[status]=active, filter[over_budget]=true,
+                 *     filter[from]=2026-11-01 e filter[to]=2026-11-30.
+                 */
+                filter?: {
+                    status?: components["schemas"]["SiteStatus"];
+                    over_budget?: boolean;
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di cantieri con i loro costi */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteCostTotalList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportSiteCostTotals: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "name" | "-name" | "total" | "-total" | "period_total" | "-period_total" | "remaining" | "-remaining";
+                filter?: {
+                    status?: components["schemas"]["SiteStatus"];
+                    over_budget?: boolean;
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportSiteCosts: {
+        parameters: {
+            query?: {
+                sort?: "date" | "-date" | "amount" | "-amount";
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    supplier?: components["schemas"]["Id"];
+                    category?: components["schemas"]["CostCategory"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     getSiteCost: {
         parameters: {
             query?: never;
@@ -6156,7 +13494,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6194,7 +13536,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6226,17 +13572,35 @@ export interface operations {
                 page?: components["parameters"]["Page"];
                 per_page?: components["parameters"]["PerPage"];
                 /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
-                sort?: "date" | "-date" | "number" | "-number" | "total" | "-total";
+                sort?: "date" | "-date" | "number" | "-number" | "total" | "-total" | "delivery_date" | "-delivery_date";
                 /**
                  * @description Filtri, ad esempio filter[supplier]=<id>, filter[site]=<id>, filter[status]=sent,
-                 *     filter[from]=2026-11-01 e filter[to]=2026-11-30 (sulla data dell'ordine).
+                 *     filter[from]=2026-11-01 e filter[to]=2026-11-30 (sulla data dell'ordine),
+                 *     filter[follow_up]=late, filter[invoiced]=false, filter[q]=testo (nel numero come
+                 *     2026/007, nelle note, nelle descrizioni delle righe e nel CIG o nel CUP del cantiere,
+                 *     anche scritti con gli spazi, senza distinguere maiuscole e minuscole). Con
+                 *     sort=delivery_date gli ordini senza data di consegna vanno in fondo.
                  */
                 filter?: {
                     supplier?: components["schemas"]["Id"];
                     site?: components["schemas"]["Id"];
                     status?: components["schemas"]["PurchaseOrderStatus"];
+                    follow_up?: components["schemas"]["PurchaseOrderFollowUp"];
                     from?: components["schemas"]["Date"];
                     to?: components["schemas"]["Date"];
+                    q?: string;
+                    /**
+                     * @description true per i soli ordini con almeno una fattura ricevuta collegata, false per
+                     *     quelli senza (con filter[status]=received: merce arrivata, fattura da
+                     *     registrare). Chiede anche invoices.view, altrimenti 403.
+                     */
+                    invoiced?: boolean;
+                    /**
+                     * @description true per i soli ordini con l'imponibile fatturato (invoiced_amount) oltre il
+                     *     totale dell'ordine, da controllare con il fornitore; false per gli altri,
+                     *     anche senza fatture. Chiede anche invoices.view, altrimenti 403.
+                     */
+                    over_invoiced?: boolean;
                 };
             };
             header?: never;
@@ -6295,6 +13659,114 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    exportPurchaseOrders: {
+        parameters: {
+            query?: {
+                sort?: "date" | "-date" | "number" | "-number" | "total" | "-total" | "delivery_date" | "-delivery_date";
+                filter?: {
+                    supplier?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                    status?: components["schemas"]["PurchaseOrderStatus"];
+                    follow_up?: components["schemas"]["PurchaseOrderFollowUp"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                    /**
+                     * @description true per i soli ordini con almeno una fattura ricevuta collegata, false per
+                     *     quelli senza (con filter[status]=received: merce arrivata, fattura da
+                     *     registrare). Chiede anche invoices.view, altrimenti 403.
+                     */
+                    invoiced?: boolean;
+                    /**
+                     * @description true per i soli ordini con l'imponibile fatturato (invoiced_amount) oltre il
+                     *     totale dell'ordine, da controllare con il fornitore; false per gli altri,
+                     *     anche senza fatture. Chiede anche invoices.view, altrimenti 403.
+                     */
+                    over_invoiced?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getPurchaseOrderPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il PDF */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    exportPurchaseOrderLines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getPurchaseOrder: {
         parameters: {
             query?: never;
@@ -6326,7 +13798,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6373,7 +13849,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6408,11 +13888,43 @@ export interface operations {
             428: components["responses"]["PreconditionRequired"];
         };
     };
+    duplicatePurchaseOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                order: components["parameters"]["PurchaseOrderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description La copia in bozza */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrder"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     changePurchaseOrderStatus: {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6479,6 +13991,11 @@ export interface operations {
                         item_id: components["schemas"]["Id"];
                         /** @description Quantità maggiore di zero, nell'unità dell'articolo. */
                         quantity: components["schemas"]["Quantity"];
+                        /**
+                         * @description Costo unitario senza IVA, nell'unità dell'articolo (di solito il prezzo
+                         *     della riga dell'ordine); si può omettere o mandare null se non si sa.
+                         */
+                        unit_cost?: components["schemas"]["Amount"] | null;
                     }[];
                 };
             };
@@ -6519,6 +14036,14 @@ export interface operations {
                 search?: components["parameters"]["Search"];
                 /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
                 sort?: "name" | "-name" | "code" | "-code" | "stock" | "-stock";
+                /** @description Filtri, ad esempio filter[below_min]=true. */
+                filter?: components["parameters"]["WarehouseItemFilter"];
+                /**
+                 * @description Giacenza, costo medio, valore e scorta minima a fine giornata di questa data, con i soli
+                 *     movimenti fino a quel giorno compreso: ad esempio le rimanenze al 31 dicembre. Senza,
+                 *     contano tutti i movimenti.
+                 */
+                as_of?: components["parameters"]["WarehouseAsOf"];
             };
             header?: never;
             path: {
@@ -6576,6 +14101,105 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    importWarehouseItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example codice;articolo;unità;giacenza
+                 *     CEM-01;Cemento 32,5 R;sacco;40
+                 */
+                "text/csv": string;
+            };
+        };
+        responses: {
+            /** @description Articoli importati */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Articoli aggiunti. */
+                        created: number;
+                        /** @description Articoli con un carico della giacenza iniziale. */
+                        stock_loaded: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File più grande di 5 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Il corpo non è un file CSV (Content-Type text/csv). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportWarehouseItems: {
+        parameters: {
+            query?: {
+                /** @description Testo libero; il backend decide su quali campi cercare. */
+                search?: components["parameters"]["Search"];
+                sort?: "name" | "-name" | "code" | "-code" | "stock" | "-stock";
+                /** @description Filtri, ad esempio filter[below_min]=true. */
+                filter?: components["parameters"]["WarehouseItemFilter"];
+                /**
+                 * @description Giacenza, costo medio, valore e scorta minima a fine giornata di questa data, con i soli
+                 *     movimenti fino a quel giorno compreso: ad esempio le rimanenze al 31 dicembre. Senza,
+                 *     contano tutti i movimenti.
+                 */
+                as_of?: components["parameters"]["WarehouseAsOf"];
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     getWarehouseItem: {
         parameters: {
             query?: never;
@@ -6607,7 +14231,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6645,7 +14273,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6687,7 +14319,9 @@ export interface operations {
                 per_page?: components["parameters"]["PerPage"];
                 /**
                  * @description Filtri, ad esempio filter[item]=<id>, filter[site]=<id>, filter[kind]=out,
-                 *     filter[from]=2026-11-01 e filter[to]=2026-11-30.
+                 *     filter[from]=2026-11-01 e filter[to]=2026-11-30 e filter[q]=testo (nelle note, nel
+                 *     codice e nel nome dell'articolo, senza distinguere maiuscole e minuscole, o nel CIG o
+                 *     nel CUP del cantiere, anche in parte, in minuscolo o con gli spazi).
                  */
                 filter?: {
                     item?: components["schemas"]["Id"];
@@ -6695,6 +14329,7 @@ export interface operations {
                     kind?: components["schemas"]["WarehouseMovementKind"];
                     from?: components["schemas"]["Date"];
                     to?: components["schemas"]["Date"];
+                    q?: string;
                 };
             };
             header?: never;
@@ -6752,6 +14387,45 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    exportWarehouseMovements: {
+        parameters: {
+            query?: {
+                /** @description Gli stessi filtri di listWarehouseMovements. */
+                filter?: {
+                    item?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                    kind?: components["schemas"]["WarehouseMovementKind"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     deleteWarehouseMovement: {
         parameters: {
             query?: never;
@@ -6775,6 +14449,105 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    countWarehouseStock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    date: components["schemas"]["Date"];
+                    notes?: string | null;
+                    lines: {
+                        item_id: components["schemas"]["Id"];
+                        /** @description Quantità contata, da zero in su, nell'unità dell'articolo. */
+                        quantity: components["schemas"]["Quantity"];
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Conta registrata */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WarehouseStockCountLine"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    importWarehouseStockCount: {
+        parameters: {
+            query: {
+                /** @description Data della conta. */
+                date: components["schemas"]["Date"];
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example Codice;Articolo;Unità;Giacenza;Contata
+                 *     CEM-01;Cemento 32,5 R;sacco;40,000;38
+                 */
+                "text/csv": string;
+            };
+        };
+        responses: {
+            /** @description Conta registrata */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WarehouseStockCountLine"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File più grande di 5 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Il corpo non è un file CSV (Content-Type text/csv). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
         };
     };
     getSiteCostSummary: {
@@ -6803,14 +14576,275 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getSiteMonthlyCosts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I costi per mese */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteMonthlyCosts"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    exportSiteMonthlyCosts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getSiteSupplierCosts: {
+        parameters: {
+            query?: {
+                /** @description Periodo, ad esempio filter[from]=2026-11-01 e filter[to]=2026-11-30. */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I costi per fornitore */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteSupplierCosts"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportSiteSupplierCosts: {
+        parameters: {
+            query?: {
+                /** @description Periodo, ad esempio filter[from]=2026-11-01 e filter[to]=2026-11-30. */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getSiteWorkSummary: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Filtri, ad esempio filter[from]=2026-11-01&filter[to]=2026-11-30 (estremi compresi)
+                 *     e filter[status]=approved.
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le ore del cantiere */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteWorkSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportSiteWorkSummary: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Filtri come getSiteWorkSummary, ad esempio filter[from]=2026-11-01&filter[to]=2026-11-30
+                 *     (estremi compresi) e filter[status]=approved.
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listSiteWarehouseMaterials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il materiale del cantiere */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteWarehouseMaterialList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    exportSiteWarehouseMaterials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                site: components["parameters"]["SiteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listSiteDocuments: {
         parameters: {
             query?: {
                 page?: components["parameters"]["Page"];
                 per_page?: components["parameters"]["PerPage"];
-                /** @description Filtri, ad esempio filter[kind]=photo per la scheda delle foto. */
+                /**
+                 * @description Filtri, ad esempio filter[kind]=photo per la scheda delle foto e
+                 *     filter[daily_report]=<id> per le foto di un rapportino.
+                 */
                 filter?: {
                     kind?: components["schemas"]["SiteDocumentKind"];
+                    daily_report?: components["schemas"]["Id"];
+                    q?: string;
                 };
             };
             header?: never;
@@ -6843,6 +14877,8 @@ export interface operations {
                 /** @description Nome originale del file; si tiene solo l'ultima parte del percorso. */
                 file_name: string;
                 title?: string;
+                /** @description Rapportino dello stesso cantiere a cui collegare il file. */
+                daily_report_id?: components["schemas"]["Id"];
             };
             header?: never;
             path: {
@@ -6876,7 +14912,10 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description File più grande di 20 MB. */
+            /**
+             * @description File più grande di 20 MB, oppure spazio per i file dell'azienda esaurito (code
+             *     storage_full, vedi le regole comuni).
+             */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -6929,7 +14968,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -6968,7 +15011,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7029,6 +15076,134 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getCashFlowForecast: {
+        parameters: {
+            query?: {
+                /** @description Quanti mesi, quello in corso compreso. */
+                months?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description La previsione */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashFlowForecast"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportCashFlowForecast: {
+        parameters: {
+            query?: {
+                /** @description Quanti mesi, quello in corso compreso. */
+                months?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getVatSummary: {
+        parameters: {
+            query?: {
+                /** @description L'anno, quello in corso in Italia se manca. */
+                year?: number;
+                /** @description month per i mensili, quarter per i trimestrali. */
+                period?: "month" | "quarter";
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il riepilogo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VatSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportVatSummary: {
+        parameters: {
+            query?: {
+                /** @description L'anno, quello in corso in Italia se manca. */
+                year?: number;
+                /** @description month per i mensili, quarter per i trimestrali. */
+                period?: "month" | "quarter";
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     getDashboard: {
         parameters: {
             query?: never;
@@ -7052,6 +15227,35 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    searchCompany: {
+        parameters: {
+            query: {
+                /** @description Il testo da cercare. */
+                q: string;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I risultati */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
         };
     };
     listSiteActivities: {
@@ -7117,7 +15321,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7156,7 +15364,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7181,6 +15393,162 @@ export interface operations {
             404: components["responses"]["NotFound"];
             412: components["responses"]["StaleRecord"];
             428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listCompanyActivities: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    follow_up?: components["schemas"]["ActivityFollowUp"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di attività */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyActivityList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportCompanyActivities: {
+        parameters: {
+            query?: {
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    follow_up?: components["schemas"]["ActivityFollowUp"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listCompanyProgressStatements: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    client?: components["schemas"]["Id"];
+                    estimate?: components["schemas"]["Id"];
+                    status?: components["schemas"]["ProgressStatementStatus"];
+                    /** @enum {string} */
+                    invoiced?: "true" | "false";
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di SAL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyProgressStatementList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportCompanyProgressStatements: {
+        parameters: {
+            query?: {
+                filter?: {
+                    site?: components["schemas"]["Id"];
+                    client?: components["schemas"]["Id"];
+                    estimate?: components["schemas"]["Id"];
+                    status?: components["schemas"]["ProgressStatementStatus"];
+                    /** @enum {string} */
+                    invoiced?: "true" | "false";
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
         };
     };
     listProgressStatements: {
@@ -7283,7 +15651,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7331,7 +15703,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7367,11 +15743,73 @@ export interface operations {
             428: components["responses"]["PreconditionRequired"];
         };
     };
+    exportProgressStatement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getProgressStatementPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+                statement: components["parameters"]["ProgressStatementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il PDF */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     approveProgressStatement: {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7505,7 +15943,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7543,7 +15985,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7634,11 +16080,134 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    duplicatePriceList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceListDuplicateInput"];
+            };
+        };
+        responses: {
+            /** @description La copia */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportPriceListItems: {
+        parameters: {
+            query?: {
+                /** @description Cerca nel codice e nella descrizione. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    importPriceListItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                list: components["parameters"]["PriceListId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example codice;descrizione;unità;prezzo
+                 *     01.A01.A10;Scavo di sbancamento;m³;8,50
+                 */
+                "text/csv": string;
+            };
+        };
+        responses: {
+            /** @description Voci importate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceListImportResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File più grande di 5 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Il corpo non è un file CSV (Content-Type text/csv). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     updatePriceListItem: {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7677,7 +16246,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7713,9 +16286,20 @@ export interface operations {
                 search?: components["parameters"]["Search"];
                 /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
                 sort?: "last_name" | "-last_name" | "hired_on" | "-hired_on" | "updated_at" | "-updated_at";
-                /** @description Filtri: filter[active]=true solo gli attivi, false solo i cessati; senza filtro tutti. */
+                /**
+                 * @description Filtri: filter[active]=true solo gli attivi, false solo i cessati; senza filtro
+                 *     tutti. filter[documents]=expired i dipendenti con un documento scaduto, expiring
+                 *     quelli con un documento in scadenza.
+                 */
                 filter?: {
                     active?: boolean;
+                    /**
+                     * @description Documenti del dipendente (idoneità sanitaria, corsi...), contando per ogni tipo
+                     *     solo quello con la scadenza più lontana. expired: almeno uno scaduto. expiring:
+                     *     nessuno scaduto e almeno uno che scade entro 30 giorni (ora italiana).
+                     * @enum {string}
+                     */
+                    documents?: "expired" | "expiring";
                 };
             };
             header?: never;
@@ -7774,6 +16358,62 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    importEmployees: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example cognome;nome;mansione;costo orario
+                 *     Rossi;Mario;Muratore;28,50
+                 */
+                "text/csv": string;
+            };
+        };
+        responses: {
+            /** @description Dipendenti importati */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Dipendenti aggiunti. */
+                        created: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File più grande di 5 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Il corpo non è un file CSV (Content-Type text/csv). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     exportEmployees: {
         parameters: {
             query?: {
@@ -7782,6 +16422,13 @@ export interface operations {
                 sort?: "last_name" | "-last_name" | "hired_on" | "-hired_on" | "updated_at" | "-updated_at";
                 filter?: {
                     active?: boolean;
+                    /**
+                     * @description Documenti del dipendente (idoneità sanitaria, corsi...), contando per ogni tipo
+                     *     solo quello con la scadenza più lontana. expired: almeno uno scaduto. expiring:
+                     *     nessuno scaduto e almeno uno che scade entro 30 giorni (ora italiana).
+                     * @enum {string}
+                     */
+                    documents?: "expired" | "expiring";
                 };
             };
             header?: never;
@@ -7841,7 +16488,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7879,7 +16530,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -7914,6 +16569,743 @@ export interface operations {
             428: components["responses"]["PreconditionRequired"];
         };
     };
+    listEmployeeSites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I cantieri del dipendente */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeSiteList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    exportEmployeeSites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getEmployeeWorkSummary: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Filtri, ad esempio filter[from]=2026-11-01&filter[to]=2026-11-30 (estremi compresi)
+                 *     e filter[status]=approved.
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le ore per cantiere */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeWorkSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportEmployeeWorkSummary: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Filtri come getEmployeeWorkSummary, ad esempio filter[from]=2026-11-01&filter[to]=2026-11-30
+                 *     (estremi compresi) e filter[status]=approved.
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listEmployeeAbsences: {
+        parameters: {
+            query?: {
+                /** @description Filtri, ad esempio filter[from]=2026-11-01&filter[to]=2026-11-30. */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le assenze */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeAbsenceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createEmployeeAbsence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmployeeAbsenceInput"];
+            };
+        };
+        responses: {
+            /** @description Assenza registrata */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeAbsence"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateEmployeeAbsence: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                absence: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmployeeAbsenceInput"];
+            };
+        };
+        responses: {
+            /** @description Assenza aggiornata */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeAbsence"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteEmployeeAbsence: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                absence: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assenza eliminata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listLeaveCarryovers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I riporti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaveCarryoverList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setLeaveCarryover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                /** @description Anno in cui le ferie si riportano, da 2000 a 2100. */
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaveCarryoverInput"];
+            };
+        };
+        responses: {
+            /** @description Riporto salvato */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaveCarryover"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    deleteLeaveCarryover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                /** @description Anno in cui le ferie si riportano, da 2000 a 2100. */
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Riporto eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listCompanyAbsences: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /**
+                 * @description Filtri, ad esempio filter[from]=2026-08-01&filter[to]=2026-08-31&filter[kind]=vacation
+                 *     e filter[q]=testo (nel nome e cognome del dipendente, in qualunque ordine, e nelle
+                 *     note, senza distinguere maiuscole e minuscole).
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    employee?: components["schemas"]["Id"];
+                    kind?: components["schemas"]["EmployeeAbsenceKind"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di assenze */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyAbsenceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportCompanyAbsences: {
+        parameters: {
+            query?: {
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    employee?: components["schemas"]["Id"];
+                    kind?: components["schemas"]["EmployeeAbsenceKind"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportAbsencesCalendar: {
+        parameters: {
+            query?: {
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    employee?: components["schemas"]["Id"];
+                    kind?: components["schemas"]["EmployeeAbsenceKind"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file iCalendar */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/calendar": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getAbsenceTotals: {
+        parameters: {
+            query?: {
+                /** @description Anno solare, da 2000 a 2100. */
+                year?: number;
+                /**
+                 * @description Filtri, ad esempio filter[employee]=<id>, filter[vacation]=exceeded oppure
+                 *     filter[permit]=exceeded; insieme valgono tutti.
+                 */
+                filter?: components["parameters"]["AbsenceTotalsFilter"];
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le assenze dell'anno */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AbsenceTotals"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listHolidays: {
+        parameters: {
+            query?: {
+                /** @description Anno solare, da 2000 a 2100. */
+                year?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le festività dell'anno */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HolidayList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    countWorkingDays: {
+        parameters: {
+            query: {
+                /** @description Primo giorno, AAAA-MM-GG. */
+                from: components["schemas"]["Date"];
+                /** @description Ultimo giorno, AAAA-MM-GG, compreso. */
+                to: components["schemas"]["Date"];
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I giorni lavorativi del periodo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkingDays"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    findWorkingDaysEnd: {
+        parameters: {
+            query: {
+                /** @description Primo giorno, AAAA-MM-GG. */
+                from: components["schemas"]["Date"];
+                /** @description Giorni lavorativi da contare, da 1 a 500. */
+                working_days: number;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description L'ultimo giorno del periodo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkingDaysEnd"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    findWorkingDaysStart: {
+        parameters: {
+            query: {
+                /** @description Ultimo giorno, AAAA-MM-GG. */
+                to: components["schemas"]["Date"];
+                /** @description Giorni lavorativi da contare all'indietro, da 1 a 500. */
+                working_days: number;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il primo giorno del periodo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkingDaysStart"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportHolidaysCalendar: {
+        parameters: {
+            query?: {
+                /** @description Anno solare, da 2000 a 2100. */
+                year?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file iCalendar */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/calendar": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    closeAbsenceYear: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AbsenceYearClosingInput"];
+            };
+        };
+        responses: {
+            /** @description I riporti scritti nell'anno dopo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AbsenceYearClosing"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportAbsenceTotals: {
+        parameters: {
+            query?: {
+                /** @description Anno solare, da 2000 a 2100. */
+                year?: number;
+                /**
+                 * @description Filtri, ad esempio filter[employee]=<id>, filter[vacation]=exceeded oppure
+                 *     filter[permit]=exceeded; insieme valgono tutti.
+                 */
+                filter?: components["parameters"]["AbsenceTotalsFilter"];
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     listVehicles: {
         parameters: {
             query?: {
@@ -7923,10 +17315,21 @@ export interface operations {
                 search?: components["parameters"]["Search"];
                 /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
                 sort?: "name" | "-name" | "updated_at" | "-updated_at";
-                /** @description Filtri: filter[kind]=machine; filter[active]=true solo i mezzi in uso, false solo i dismessi. */
+                /**
+                 * @description Filtri: filter[kind]=machine; filter[active]=true solo i mezzi in uso, false solo i
+                 *     dismessi; filter[documents]=expired i mezzi con un documento scaduto, expiring quelli
+                 *     con un documento in scadenza.
+                 */
                 filter?: {
                     kind?: components["schemas"]["VehicleKind"];
                     active?: boolean;
+                    /**
+                     * @description Documenti del mezzo (assicurazione, bollo...), contando per ogni tipo solo
+                     *     quello con la scadenza più lontana. expired: almeno uno scaduto. expiring:
+                     *     nessuno scaduto e almeno uno che scade entro 30 giorni (ora italiana).
+                     * @enum {string}
+                     */
+                    documents?: "expired" | "expiring";
                 };
             };
             header?: never;
@@ -7985,6 +17388,62 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    importVehicles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example nome;tipo;targa;costo orario
+                 *     Furgone;Automezzo;AB123CD;12,00
+                 */
+                "text/csv": string;
+            };
+        };
+        responses: {
+            /** @description Mezzi importati */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Mezzi aggiunti. */
+                        created: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File più grande di 5 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Il corpo non è un file CSV (Content-Type text/csv). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     exportVehicles: {
         parameters: {
             query?: {
@@ -7994,6 +17453,13 @@ export interface operations {
                 filter?: {
                     kind?: components["schemas"]["VehicleKind"];
                     active?: boolean;
+                    /**
+                     * @description Documenti del mezzo (assicurazione, bollo...), contando per ogni tipo solo
+                     *     quello con la scadenza più lontana. expired: almeno uno scaduto. expiring:
+                     *     nessuno scaduto e almeno uno che scade entro 30 giorni (ora italiana).
+                     * @enum {string}
+                     */
+                    documents?: "expired" | "expiring";
                 };
             };
             header?: never;
@@ -8053,7 +17519,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8091,7 +17561,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8124,6 +17598,1075 @@ export interface operations {
             };
             412: components["responses"]["StaleRecord"];
             428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getVehicleWorkSummary: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Filtri, ad esempio filter[from]=2026-11-01&filter[to]=2026-11-30 (estremi compresi)
+                 *     e filter[status]=approved.
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le ore per cantiere */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleWorkSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportVehicleWorkSummary: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Filtri come getVehicleWorkSummary, ad esempio filter[from]=2026-11-01&filter[to]=2026-11-30
+                 *     (estremi compresi) e filter[status]=approved.
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    status?: components["schemas"]["DailyReportStatus"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listEmployeeDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I documenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeDocumentList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createEmployeeDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmployeeDocumentInput"];
+            };
+        };
+        responses: {
+            /** @description Documento registrato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateEmployeeDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmployeeDocumentInput"];
+            };
+        };
+        responses: {
+            /** @description Documento aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteEmployeeDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Documento eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getEmployeeDocumentFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setEmployeeDocumentFile: {
+        parameters: {
+            query: {
+                /** @description Nome originale del file; si tiene solo l'ultima parte del percorso. */
+                file_name: string;
+            };
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/pdf": string;
+                "image/jpeg": string;
+                "image/png": string;
+            };
+        };
+        responses: {
+            /** @description File salvato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            /**
+             * @description File più grande di 20 MB, oppure spazio per i file dell'azienda esaurito (code
+             *     storage_full, vedi le regole comuni).
+             */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tipo di file non ammesso. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteEmployeeDocumentFile: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                employee: components["parameters"]["EmployeeId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File eliminato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listVehicleDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I documenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleDocumentList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createVehicleDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VehicleDocumentInput"];
+            };
+        };
+        responses: {
+            /** @description Documento registrato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateVehicleDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VehicleDocumentInput"];
+            };
+        };
+        responses: {
+            /** @description Documento aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteVehicleDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Documento eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getVehicleDocumentFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setVehicleDocumentFile: {
+        parameters: {
+            query: {
+                /** @description Nome originale del file; si tiene solo l'ultima parte del percorso. */
+                file_name: string;
+            };
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/pdf": string;
+                "image/jpeg": string;
+                "image/png": string;
+            };
+        };
+        responses: {
+            /** @description File salvato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            /**
+             * @description File più grande di 20 MB, oppure spazio per i file dell'azienda esaurito (code
+             *     storage_full, vedi le regole comuni).
+             */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tipo di file non ammesso. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteVehicleDocumentFile: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                document: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File eliminato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listVehicleMaintenances: {
+        parameters: {
+            query?: {
+                /** @description Filtri, ad esempio filter[from]=2026-01-01&filter[to]=2026-12-31. */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Le manutenzioni */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleMaintenanceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createVehicleMaintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VehicleMaintenanceInput"];
+            };
+        };
+        responses: {
+            /** @description Manutenzione registrata */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleMaintenance"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateVehicleMaintenance: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                maintenance: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VehicleMaintenanceInput"];
+            };
+        };
+        responses: {
+            /** @description Manutenzione aggiornata */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleMaintenance"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteVehicleMaintenance: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                maintenance: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Manutenzione eliminata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listVehicleRefuelings: {
+        parameters: {
+            query?: {
+                /** @description Filtri, ad esempio filter[from]=2026-01-01&filter[to]=2026-12-31. */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I rifornimenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleRefuelingList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createVehicleRefueling: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VehicleRefuelingInput"];
+            };
+        };
+        responses: {
+            /** @description Rifornimento registrato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleRefueling"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    updateVehicleRefueling: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                refueling: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VehicleRefuelingInput"];
+            };
+        };
+        responses: {
+            /** @description Rifornimento aggiornato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleRefueling"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteVehicleRefueling: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                vehicle: components["parameters"]["VehicleId"];
+                refueling: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rifornimento eliminato */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listCompanyVehicleMaintenances: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /**
+                 * @description Filtri, ad esempio filter[from]=2026-01-01&filter[to]=2026-12-31 (estremi compresi),
+                 *     filter[vehicle]=<id> e filter[q]=testo (nella descrizione e nelle note, senza
+                 *     distinguere maiuscole e minuscole).
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    vehicle?: components["schemas"]["Id"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di manutenzioni */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyVehicleMaintenanceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportVehicleMaintenances: {
+        parameters: {
+            query?: {
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    vehicle?: components["schemas"]["Id"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listCompanyVehicleRefuelings: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /**
+                 * @description Filtri, ad esempio filter[from]=2026-01-01&filter[to]=2026-12-31 (estremi compresi)
+                 *     e filter[vehicle]=<id>.
+                 */
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    vehicle?: components["schemas"]["Id"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di rifornimenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyVehicleRefuelingList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportVehicleRefuelings: {
+        parameters: {
+            query?: {
+                filter?: {
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    vehicle?: components["schemas"]["Id"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
         };
     };
     listEstimates: {
@@ -8207,6 +18750,7 @@ export interface operations {
                 filter?: {
                     status?: components["schemas"]["EstimateStatus"];
                     client?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
                 };
             };
             header?: never;
@@ -8266,7 +18810,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8304,7 +18852,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8400,6 +18952,66 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    getEstimatePdf: {
+        parameters: {
+            query?: {
+                /** @description false per il computo senza prezzi e importi. */
+                prices?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il PDF */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportEstimateItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                estimate: components["parameters"]["EstimateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getEstimateStructure: {
         parameters: {
             query?: never;
@@ -8431,7 +19043,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8460,6 +19076,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             412: components["responses"]["StaleRecord"];
             422: components["responses"]["ValidationFailed"];
             428: components["responses"]["PreconditionRequired"];
@@ -8495,6 +19120,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["ValidationFailed"];
         };
     };
@@ -8502,7 +19136,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8532,6 +19170,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             412: components["responses"]["StaleRecord"];
             422: components["responses"]["ValidationFailed"];
             428: components["responses"]["PreconditionRequired"];
@@ -8541,7 +19188,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8564,7 +19215,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Il capitolo contiene voci presenti in un SAL (code has_documents). */
+            /** @description Il capitolo contiene voci presenti in un SAL (code has_documents), oppure il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8607,6 +19258,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["ValidationFailed"];
         };
     };
@@ -8643,6 +19303,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["ValidationFailed"];
         };
     };
@@ -8650,7 +19319,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8680,6 +19353,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             412: components["responses"]["StaleRecord"];
             422: components["responses"]["ValidationFailed"];
             428: components["responses"]["PreconditionRequired"];
@@ -8689,7 +19371,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8712,7 +19398,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description La voce compare in un SAL (code has_documents). */
+            /** @description La voce compare in un SAL (code has_documents), oppure il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8755,6 +19441,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             422: components["responses"]["ValidationFailed"];
         };
     };
@@ -8762,7 +19457,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8792,6 +19491,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             412: components["responses"]["StaleRecord"];
             422: components["responses"]["ValidationFailed"];
             428: components["responses"]["PreconditionRequired"];
@@ -8801,7 +19509,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8824,6 +19536,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Il computo è definitivo e va prima rimesso in bozza (code estimate_final). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             412: components["responses"]["StaleRecord"];
             428: components["responses"]["PreconditionRequired"];
         };
@@ -8859,7 +19580,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -8961,6 +19686,49 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    setPurchaseOrderNumbering: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    year: number;
+                    next_number: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Numerazione aggiornata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Numbering"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il numero è già stato usato in quell'anno (code number_in_use). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     getCompanyLogo: {
         parameters: {
             query?: never;
@@ -9016,7 +19784,10 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description File più grande di 512 KB. */
+            /**
+             * @description File più grande di 512 KB, oppure spazio per i file dell'azienda esaurito (code
+             *     storage_full, vedi le regole comuni; il logo che si sostituisce non conta).
+             */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -9059,6 +19830,638 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listInvoices: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
+                sort?: "date" | "-date" | "due_date" | "-due_date" | "total" | "-total";
+                /**
+                 * @description Filtri, ad esempio filter[direction]=issued, filter[client]=<id>,
+                 *     filter[supplier]=<id>, filter[site]=<id>, filter[status]=overdue,
+                 *     filter[from]=2026-11-01 e filter[to]=2026-11-30 (sulla data della fattura) e
+                 *     filter[q]=testo (nel numero, nella descrizione e nel CIG o nel CUP del cantiere,
+                 *     anche scritti con gli spazi), filter[reverse_charge]=true e
+                 *     filter[split_payment]=true (le fatture dietro reverse_charge_taxable e
+                 *     sales_split_payment_vat di getVatSummary), filter[purchase_order]=<id> (le fatture
+                 *     ricevute di un ordine al fornitore), filter[direction]=received con
+                 *     filter[has_purchase_order]=false (le fatture ricevute senza ordine),
+                 *     filter[document_type]=credit_note (solo le note di credito),
+                 *     filter[credited_invoice]=<id> (le note di credito di una fattura) e
+                 *     filter[retention_release]=true (le fatture di svincolo della ritenuta).
+                 */
+                filter?: {
+                    direction?: components["schemas"]["InvoiceDirection"];
+                    document_type?: components["schemas"]["InvoiceDocumentType"];
+                    credited_invoice?: components["schemas"]["Id"];
+                    client?: components["schemas"]["Id"];
+                    supplier?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                    status?: components["schemas"]["InvoicePaymentStatus"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                    /**
+                     * @description true per le sole fatture con natura IVA N6.x (inversione contabile), false
+                     *     per le altre.
+                     */
+                    reverse_charge?: boolean;
+                    /** @description true per le sole fatture in scissione dei pagamenti, false per le altre. */
+                    split_payment?: boolean;
+                    /**
+                     * @description true per le sole fatture di svincolo della ritenuta di garanzia (quelle dietro
+                     *     retention_released del riepilogo dei costi del cantiere), false per le altre.
+                     */
+                    retention_release?: boolean;
+                    /** @description Le sole fatture ricevute che addebitano questo ordine al fornitore. */
+                    purchase_order?: components["schemas"]["Id"];
+                    /**
+                     * @description true per le sole fatture collegate a un ordine al fornitore, false per le altre;
+                     *     con filter[direction]=received e false, le fatture ricevute senza ordine (da
+                     *     controllare: acquisti fatti fuori dagli ordini, o ordine da collegare).
+                     */
+                    has_purchase_order?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di fatture */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceInput"];
+            };
+        };
+        responses: {
+            /** @description Fattura registrata */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportInvoices: {
+        parameters: {
+            query?: {
+                sort?: "date" | "-date" | "due_date" | "-due_date" | "total" | "-total";
+                filter?: {
+                    direction?: components["schemas"]["InvoiceDirection"];
+                    document_type?: components["schemas"]["InvoiceDocumentType"];
+                    credited_invoice?: components["schemas"]["Id"];
+                    client?: components["schemas"]["Id"];
+                    supplier?: components["schemas"]["Id"];
+                    site?: components["schemas"]["Id"];
+                    status?: components["schemas"]["InvoicePaymentStatus"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                    /**
+                     * @description true per le sole fatture con natura IVA N6.x (inversione contabile), false
+                     *     per le altre.
+                     */
+                    reverse_charge?: boolean;
+                    /** @description true per le sole fatture in scissione dei pagamenti, false per le altre. */
+                    split_payment?: boolean;
+                    /**
+                     * @description true per le sole fatture di svincolo della ritenuta di garanzia (quelle dietro
+                     *     retention_released del riepilogo dei costi del cantiere), false per le altre.
+                     */
+                    retention_release?: boolean;
+                    /** @description Le sole fatture ricevute che addebitano questo ordine al fornitore. */
+                    purchase_order?: components["schemas"]["Id"];
+                    /**
+                     * @description true per le sole fatture collegate a un ordine al fornitore, false per le altre;
+                     *     con filter[direction]=received e false, le fatture ricevute senza ordine (da
+                     *     controllare: acquisti fatti fuori dagli ordini, o ordine da collegare).
+                     */
+                    has_purchase_order?: boolean;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description La fattura */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateInvoice: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceInput"];
+            };
+        };
+        responses: {
+            /** @description Fattura aggiornata */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteInvoice: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fattura eliminata */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description La fattura ha note di credito (code has_documents). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    getInvoiceFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setInvoiceFile: {
+        parameters: {
+            query: {
+                /** @description Nome originale del file; si tiene solo l'ultima parte del percorso. */
+                file_name: string;
+            };
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/pdf": string;
+                "image/jpeg": string;
+                "image/png": string;
+            };
+        };
+        responses: {
+            /** @description File salvato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            /**
+             * @description File più grande di 20 MB, oppure spazio per i file dell'azienda esaurito (code
+             *     storage_full, vedi le regole comuni).
+             */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tipo di file non ammesso. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteInvoiceFile: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File eliminato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listInvoicePayments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description I pagamenti della fattura */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["InvoicePayment"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createInvoicePayment: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoicePaymentInput"];
+            };
+        };
+        responses: {
+            /** @description Pagamento registrato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /**
+             * @description Sulla nota di credito, che non è di rimborso, non si registrano pagamenti (code
+             *     credit_note).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            422: components["responses"]["ValidationFailed"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    deleteInvoicePayment: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                invoice: components["parameters"]["InvoiceId"];
+                payment: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pagamento eliminato */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /**
+             * @description La fattura ha note di rimborso e non resterebbe pagata per il loro totale (code
+             *     has_documents).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            412: components["responses"]["StaleRecord"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listPayments: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                per_page?: components["parameters"]["PerPage"];
+                filter?: {
+                    direction?: components["schemas"]["InvoiceDirection"];
+                    site?: components["schemas"]["Id"];
+                    client?: components["schemas"]["Id"];
+                    supplier?: components["schemas"]["Id"];
+                    method?: components["schemas"]["InvoicePaymentMethod"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Una pagina di incassi e pagamenti */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportPayments: {
+        parameters: {
+            query?: {
+                filter?: {
+                    direction?: components["schemas"]["InvoiceDirection"];
+                    site?: components["schemas"]["Id"];
+                    client?: components["schemas"]["Id"];
+                    supplier?: components["schemas"]["Id"];
+                    method?: components["schemas"]["InvoicePaymentMethod"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    q?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
         };
     };
     listRoles: {
@@ -9195,6 +20598,19 @@ export interface operations {
                     entity?: components["schemas"]["AuditEntity"];
                     entity_id?: components["schemas"]["Id"];
                     user?: components["schemas"]["Id"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    /**
+                     * @description create, update o delete; ad esempio solo le eliminazioni.
+                     * @enum {string}
+                     */
+                    action?: "create" | "update" | "delete";
+                    /**
+                     * @description Solo le modifiche che hanno cambiato questo campo, con il nome dei campi
+                     *     di AuditEntry (ad esempio budget, permissions, lines); da 1 a 64 lettere
+                     *     minuscole, cifre e trattini bassi.
+                     */
+                    field?: string;
                 };
             };
             header?: never;
@@ -9213,6 +20629,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditLogList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    exportAuditLog: {
+        parameters: {
+            query?: {
+                /** @description Gli stessi filtri di listAuditLog. */
+                filter?: {
+                    entity?: components["schemas"]["AuditEntity"];
+                    entity_id?: components["schemas"]["Id"];
+                    user?: components["schemas"]["Id"];
+                    from?: components["schemas"]["Date"];
+                    to?: components["schemas"]["Date"];
+                    /**
+                     * @description create, update o delete; ad esempio solo le eliminazioni.
+                     * @enum {string}
+                     */
+                    action?: "create" | "update" | "delete";
+                    /**
+                     * @description Solo le modifiche che hanno cambiato questo campo, con il nome dei campi
+                     *     di AuditEntry (ad esempio budget, permissions, lines); da 1 a 64 lettere
+                     *     minuscole, cifre e trattini bassi.
+                     */
+                    field?: string;
+                };
+            };
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -9383,7 +20848,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvitationCreated"];
+                    "application/json": components["schemas"]["Invitation"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -9399,6 +20864,15 @@ export interface operations {
                 };
             };
             422: components["responses"]["ValidationFailed"];
+            /** @description Il messaggio d'invito non è partito (code email_not_sent). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     deleteInvitation: {
@@ -9447,6 +20921,33 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    getInvitationLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["InvitationToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il logo */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     acceptInvitation: {
@@ -9493,12 +20994,19 @@ export interface operations {
                 per_page?: components["parameters"]["PerPage"];
                 /** @description Testo libero; il backend decide su quali campi cercare. */
                 search?: components["parameters"]["Search"];
-                /** @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. */
-                sort?: "number" | "-number" | "issue_date" | "-issue_date" | "updated_at" | "-updated_at";
-                /** @description Filtri, ad esempio filter[status]=sent o filter[client]=<id>. */
+                /**
+                 * @description Campo di ordinamento; il segno meno vuol dire ordine decrescente. valid_until mette
+                 *     le bozze, che non hanno una validità, in fondo.
+                 */
+                sort?: "number" | "-number" | "issue_date" | "-issue_date" | "updated_at" | "-updated_at" | "valid_until" | "-valid_until";
+                /**
+                 * @description Filtri, ad esempio filter[status]=sent, filter[client]=<id> o
+                 *     filter[follow_up]=expiring.
+                 */
                 filter?: {
                     status?: components["schemas"]["QuoteStatus"];
                     client?: components["schemas"]["Id"];
+                    follow_up?: components["schemas"]["QuoteFollowUp"];
                 };
             };
             header?: never;
@@ -9562,10 +21070,11 @@ export interface operations {
             query?: {
                 /** @description Testo libero; il backend decide su quali campi cercare. */
                 search?: components["parameters"]["Search"];
-                sort?: "number" | "-number" | "issue_date" | "-issue_date" | "updated_at" | "-updated_at";
+                sort?: "number" | "-number" | "issue_date" | "-issue_date" | "updated_at" | "-updated_at" | "valid_until" | "-valid_until";
                 filter?: {
                     status?: components["schemas"]["QuoteStatus"];
                     client?: components["schemas"]["Id"];
+                    follow_up?: components["schemas"]["QuoteFollowUp"];
                 };
             };
             header?: never;
@@ -9625,7 +21134,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -9672,7 +21185,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -9711,7 +21228,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -9753,7 +21274,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -9827,6 +21352,46 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    createSiteFromQuote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il cantiere creato */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Site"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /**
+             * @description Il preventivo non è accettato (code invalid_transition) o ha già un cantiere
+             *     (code site_exists).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     reviseQuote: {
         parameters: {
             query?: never;
@@ -9864,6 +21429,39 @@ export interface operations {
             };
         };
     };
+    duplicateQuote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteDuplicateInput"];
+            };
+        };
+        responses: {
+            /** @description La copia in bozza */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quote"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     listQuoteLines: {
         parameters: {
             query?: never;
@@ -9888,6 +21486,47 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    arrangeQuoteLines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteLineArrangement"];
+            };
+        };
+        responses: {
+            /** @description Le righe nel nuovo ordine */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteLineList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Il preventivo non è più in bozza (code quote_not_draft). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
         };
     };
     createQuoteLine: {
@@ -9932,11 +21571,43 @@ export interface operations {
             422: components["responses"]["ValidationFailed"];
         };
     };
+    exportQuoteLines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Slug dell'azienda, lo stesso che compare nell'URL dell'app. */
+                company: components["parameters"]["Company"];
+                quote: components["parameters"]["QuoteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Il file CSV */
+            200: {
+                headers: {
+                    /** @description attachment, con il nome del file. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     updateQuoteLine: {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
@@ -9984,7 +21655,11 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description ETag della versione che l'utente ha davanti. */
+                /**
+                 * @description ETag della versione che l'utente ha davanti, così come è arrivato: "7", oppure W/"7"
+                 *     se un proxy che comprime lo ha reso debole. Si controlla prima del corpo: con una
+                 *     versione superata la risposta è 412 anche se il corpo non è valido.
+                 */
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {

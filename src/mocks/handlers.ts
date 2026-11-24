@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw/http'
 import type { components } from '@/api/schema'
-import { companies, dashboardFor, MOCK_PASSWORD, users } from './data'
+import { companies, DASHBOARD_NOT_SHOWN, dashboardFor, MOCK_PASSWORD, users } from './data'
 import { db } from './db'
 
 type Schemas = components['schemas']
@@ -269,6 +269,7 @@ export const handlers = [
       email: user.email,
       companies: user.memberships.map((m) => ({
         slug: m.company,
+        has_logo: false,
         name: companies.find((c) => c.slug === m.company)?.name ?? m.company,
         role: m.role,
         permissions: m.permissions,
@@ -417,11 +418,13 @@ export const handlers = [
     const full = dashboardFor(company, todayInItaly())
     return HttpResponse.json({
       today: full.today,
+      today_holiday: full.today_holiday,
       sites: can('sites.view') ? full.sites : null,
       over_budget: can('sites.view') && can('costs.view') ? full.over_budget : null,
       costs_this_month: can('costs.view') ? full.costs_this_month : null,
       reports: can('reports.view') ? full.reports : null,
       deadlines: can('deadlines.view') ? full.deadlines : null,
+      ...DASHBOARD_NOT_SHOWN,
     } satisfies Schemas['Dashboard'])
   }),
 ]

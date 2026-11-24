@@ -31,6 +31,7 @@ export const SUPPLIER_DOCUMENT_KINDS = [
   'durc',
   'chamber_extract',
   'insurance',
+  'credit_license',
   'other',
 ] as const satisfies readonly SupplierDocumentKind[]
 

@@ -163,6 +163,7 @@ function expectedMe(user: MockUser) {
     email: user.email,
     companies: user.memberships.map((m) => ({
       slug: m.company,
+      has_logo: false,
       name: companyName.get(m.company),
       role: m.role,
       permissions: m.permissions,
