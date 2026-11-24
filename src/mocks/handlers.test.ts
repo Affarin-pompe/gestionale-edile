@@ -279,7 +279,7 @@ describe('mock backend: session and CSRF', () => {
     const { response, error } = await send(forgedCsrfClient(jar, csrf))
 
     expect(response.status).toBe(403)
-    expect(error).toStrictEqual({ message: anyString })
+    expect(error).toStrictEqual({ message: anyString, code: 'csrf_invalid' })
     // No session created, switched or closed
     expect(response.headers.getSetCookie()).toEqual([])
     expect((await api.GET('/api/me')).data?.email).toBe(TITOLARE)

@@ -112,7 +112,8 @@ function hasValidCsrf(request: Request, cookies: Cookies) {
 function guard(request: Request, cookies: Cookies, company: string, changesData: boolean) {
   const user = currentUser(cookies)
   if (!user) return error(401, SESSION_EXPIRED)
-  if (changesData && !hasValidCsrf(request, cookies)) return error(403, BAD_CSRF)
+  if (changesData && !hasValidCsrf(request, cookies))
+    return error(403, BAD_CSRF, undefined, 'csrf_invalid')
   const membership = user.memberships.find((m) => m.company === company)
   // Another company's data looks exactly like data that does not exist
   if (!membership) return error(404, NOT_FOUND)
@@ -222,7 +223,7 @@ export const handlers = [
   }),
 
   http.post(path('/auth/login'), async ({ request, cookies }) => {
-    if (!hasValidCsrf(request, cookies)) return error(403, BAD_CSRF)
+    if (!hasValidCsrf(request, cookies)) return error(403, BAD_CSRF, undefined, 'csrf_invalid')
     const body = await readJson(request)
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
     const password = typeof body.password === 'string' ? body.password : ''
@@ -255,7 +256,7 @@ export const handlers = [
 
   http.post(path('/auth/logout'), ({ request, cookies }) => {
     if (!currentUser(cookies)) return error(401, SESSION_EXPIRED)
-    if (!hasValidCsrf(request, cookies)) return error(403, BAD_CSRF)
+    if (!hasValidCsrf(request, cookies)) return error(403, BAD_CSRF, undefined, 'csrf_invalid')
     return new HttpResponse(null, { status: 204, headers: sessionCookies(null) })
   }),
 
