@@ -31,8 +31,8 @@ const ROSSI_API_PATH = '/api/companies/impresa-rossi/clients'
 
 const T = messages
 
-// The seed data, to know which rows each page should show
-const ROSSI = seedClients()['impresa-rossi'] ?? []
+// The seed data, to know which rows each page should show: the list opens on the active clients
+const ROSSI = (seedClients()['impresa-rossi'] ?? []).filter((c) => c.archived_at === null)
 const ROSSI_BY_NAME = ROSSI.map((c) => c.name).sort((a, b) => a.localeCompare(b, 'it'))
 const ROSSI_NEWEST_FIRST = [...ROSSI]
   .sort((a, b) => b.created_at.localeCompare(a.created_at))

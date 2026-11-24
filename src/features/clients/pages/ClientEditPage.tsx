@@ -14,14 +14,21 @@ export function ClientEditPage() {
   const company = useCompany()
   const id = useClientId()
   const paths = clientPaths(company.slug)
-  // Already loaded by the route's loader
-  const { data: client } = useSuspenseQuery(clientQuery(company.slug, id))
+  // Already loaded by the route's loader, with the version the changes apply to
+  const { data, refetch } = useSuspenseQuery(clientQuery(company.slug, id))
+  const { client, etag } = data
   const update = useUpdateClient(company.slug, id)
 
   async function save(input: ClientInput) {
-    await update.mutateAsync(input)
+    await update.mutateAsync({ input, etag })
     toast.success(intl.formatMessage({ id: 'clients.updated' }))
     await navigate(paths.detail(id))
+  }
+
+  // After a 412: the newer version replaces the form (its key is the version)
+  async function reload() {
+    const result = await refetch()
+    if (result.isError) throw result.error
   }
 
   return (
@@ -30,7 +37,13 @@ export function ClientEditPage() {
         back={{ to: paths.detail(id), label: client.name }}
         title={<FormattedMessage id="clients.editTitle" />}
       />
-      <ClientForm client={client} onSubmit={save} cancelTo={paths.detail(id)} />
+      <ClientForm
+        key={etag}
+        client={client}
+        onSubmit={save}
+        onReload={reload}
+        cancelTo={paths.detail(id)}
+      />
     </div>
   )
 }

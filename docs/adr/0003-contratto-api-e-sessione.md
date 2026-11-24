@@ -34,11 +34,11 @@ Insieme alla sessione si propongono queste regole del contratto:
 - **Importi e quantità come stringhe**, date in ISO 8601.
 - **File:** caricamento tramite indirizzo firmato a scadenza breve. Il frontend invia poi l'id ottenuto.
 
-**Dove vive il file [da concordare]:** per ora è `api/openapi.yaml` in questo repository, con il primo pezzo (accesso, `/api/me`, Clienti). Spostarlo costa poco.
+**Dove vive il file (deciso a novembre 2026):** la fonte è `contract/openapi.yaml` nel repository del backend, che lo implementa e ne controlla ogni risposta nei test. In questo repository `api/openapi.yaml` è una copia: non si modifica a mano, si aggiorna ricopiando il file del backend, e la CI controlla che i tipi generati (`src/api/schema.d.ts`) corrispondano alla copia. Ogni cambio di API si fa prima nel backend.
 
 ## Conseguenze accettate
 - La pubblicazione è vincolata: frontend e API devono stare sullo stesso sito.
-- Ogni cambio di API passa prima dal file OpenAPI. Una modifica fatta solo nel codice del backend rompe la compilazione del frontend, ed è voluto.
+- Ogni cambio di API passa prima dal file OpenAPI del backend. Il frontend lo vede quando ricopia il file e rigenera i tipi: se un campo cambia, il frontend non compila finché non si allinea, ed è voluto.
 - Per un'app nativa si dovrà aggiungere un meccanismo di accesso diverso.
 
 ## Quando riaprire

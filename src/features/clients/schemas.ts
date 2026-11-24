@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { MessageId } from '@/i18n/it'
-import { CLIENT_KINDS, type Client, type ClientInput } from './api'
+import { CLIENT_KINDS, DEFAULT_COUNTRY, type Client, type ClientInput } from './api'
 
 // Messages are ids of src/i18n/it.ts: the form translates them
 const message = (id: MessageId) => ({ error: id })
@@ -36,19 +36,39 @@ export const clientSchema = z
     email: optionalEmail,
     pec: optionalEmail,
     phone: optionalText(30),
-    sdi_code: optionalText(7),
+    // 7 characters, 6 for the public administration
+    sdi_code: optionalText(7).refine(
+      (value) => value === null || value.length >= 6,
+      message('clients.sdiCodeLength'),
+    ),
     street: optionalText(200),
     postal_code: optionalText(10),
     city: optionalText(100),
     province: optionalText(2),
+    // ISO 3166-1 alpha-2; the backend takes it in lower case too, and stores it in upper case
+    country: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .min(1, message('validation.required'))
+      .refine(
+        (value) => value === '' || /^[A-Z]{2}$/.test(value),
+        message('clients.countryInvalid'),
+      ),
     notes: optionalText(2000),
   })
   .superRefine((client, context) => {
-    if (client.kind === 'company' && !client.vat_number) {
-      context.addIssue({ code: 'custom', path: ['vat_number'], message: 'clients.vatRequired' })
-    }
+    // The tax ids are required only for Italian clients
+    if (client.country !== 'IT') return
     if (client.kind === 'person' && !client.tax_code) {
       context.addIssue({ code: 'custom', path: ['tax_code'], message: 'clients.taxCodeRequired' })
+    }
+    if (client.kind !== 'person' && !client.vat_number && !client.tax_code) {
+      context.addIssue({
+        code: 'custom',
+        path: ['vat_number'],
+        message: 'clients.vatOrTaxCodeRequired',
+      })
     }
   }) satisfies z.ZodType<ClientInput>
 
@@ -70,6 +90,7 @@ export function clientFormValues(client?: Client): ClientFormValues {
     postal_code: client?.postal_code ?? '',
     city: client?.city ?? '',
     province: client?.province ?? '',
+    country: client?.country ?? DEFAULT_COUNTRY,
     notes: client?.notes ?? '',
   }
 }

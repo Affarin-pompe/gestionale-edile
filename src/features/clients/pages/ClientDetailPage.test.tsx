@@ -71,7 +71,9 @@ const bareClient = (values: Partial<Client> = {}): Client => ({
   postal_code: null,
   city: null,
   province: null,
+  country: 'IT',
   notes: null,
+  archived_at: null,
   created_at: '2026-03-01T09:00:00.000Z',
   updated_at: '2026-03-01T09:00:00.000Z',
   ...values,
@@ -111,6 +113,7 @@ describe('client page', () => {
       [T['clients.phone']]: '011 555 1000',
       [T['clients.street']]: 'Via Ferri 1',
       [T['clients.city']]: '10121 Torino (TO)',
+      [T['clients.country']]: 'Italia',
     })
     expect(notes()).toBe(T['detail.empty'])
   })
@@ -142,6 +145,7 @@ describe('client page', () => {
       [T['clients.phone']]: T['detail.empty'],
       [T['clients.street']]: T['detail.empty'],
       [T['clients.city']]: T['detail.empty'],
+      [T['clients.country']]: 'Italia',
     })
     expect(notes()).toBe(T['detail.empty'])
     expect(main().querySelector('a[href^="mailto:"], a[href^="tel:"]')).toBeNull()

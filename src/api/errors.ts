@@ -54,3 +54,11 @@ function isValidationError(body: unknown): body is ValidationError {
     )
   )
 }
+
+/** The backend's own message of an error (Italian, meant for the user), if it sent one. */
+export function errorMessage(error: unknown): string | undefined {
+  if (!(error instanceof ApiError)) return undefined
+  const { body } = error
+  if (typeof body !== 'object' || body === null || !('message' in body)) return undefined
+  return typeof body.message === 'string' && body.message ? body.message : undefined
+}

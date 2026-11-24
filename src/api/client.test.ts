@@ -25,6 +25,7 @@ const clientInput: components['schemas']['ClientInput'] = {
   postal_code: null,
   city: null,
   province: null,
+  country: 'IT',
   notes: null,
 }
 
@@ -114,7 +115,7 @@ function createClientRequest(client: ApiClient) {
 
 function updateClientRequest(client: ApiClient) {
   return client.PUT('/api/companies/{company}/clients/{client}', {
-    params: { path: { company: COMPANY, client: CLIENT_ID } },
+    params: { path: { company: COMPANY, client: CLIENT_ID }, header: { 'If-Match': '"1"' } },
     body: clientInput,
   })
 }
@@ -249,6 +250,345 @@ describe('createApiClient: CSRF token', () => {
       expect(requests[1]?.headers.has(HEADER)).toBe(false)
     },
   )
+})
+
+describe('createApiClient: CSRF token renewal', () => {
+  const STALE = 'stale-token'
+  const FRESH = 'fresh-token'
+  const CREATE = `POST /api/companies/${COMPANY}/clients`
+  const UPDATE = `PUT /api/companies/${COMPANY}/clients/${CLIENT_ID}`
+  const RENEW = `GET ${CSRF_PATH}`
+
+  function csrfInvalid() {
+    return json({ message: 'Token di sicurezza non valido', code: 'csrf_invalid' }, 403)
+  }
+
+  function setCsrfCookie(jar: Map<string, string>, token = FRESH) {
+    jar.set(COOKIE, token)
+    return new Response(null, { status: 204 })
+  }
+
+  // A backend that has moved on to FRESH: any other token, or none, is csrf_invalid
+  const rotated: Handler = (request, jar) => {
+    if (isCsrfCall(request)) return setCsrfCookie(jar)
+    if (request.headers.get(HEADER) !== FRESH) return csrfInvalid()
+    return json({ message: 'ok' })
+  }
+
+  it.each(unsafeRequests)(
+    'after a 403 csrf_invalid on %s, calls /api/auth/csrf and sends the request once more with the new token',
+    async (method, send) => {
+      const { client, requests, onUnauthorized } = setup({
+        cookies: { [COOKIE]: STALE },
+        handler: rotated,
+      })
+
+      const { response } = (await send(client)) as { response: Response }
+
+      const sent = `${method} ${pathOf(requests[0] ?? new Request(BASE_URL))}`
+      expect(describeRequests(requests)).toEqual([sent, RENEW, sent])
+      expect(requests.map((request) => request.headers.get(HEADER))).toEqual([STALE, null, FRESH])
+      expect(response.status).toBe(200)
+      expect(onUnauthorized).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    ['POST', createClientRequest],
+    ['PUT', updateClientRequest],
+  ] as const)('sends the same body and headers again on the retried %s', async (_, send) => {
+    const { client, requests } = setup({ cookies: { [COOKIE]: STALE }, handler: rotated })
+
+    const { data, response } = await send(client)
+
+    expect(response.status).toBe(200)
+    expect(data).toEqual({ message: 'ok' })
+    const [first, , retry] = requests
+    if (!first || !retry) throw new Error('the request was not sent twice')
+    const firstBody: unknown = await first.clone().json()
+    const retryBody: unknown = await retry.clone().json()
+    expect(firstBody).toEqual(clientInput)
+    expect(retryBody).toEqual(firstBody)
+    for (const header of ['Content-Type', 'If-Match', 'Accept']) {
+      expect(retry.headers.get(header)).toBe(first.headers.get(header))
+    }
+    expect(retry.headers.get('Accept')).toBe('application/json')
+  })
+
+  it('sends the body again even when the backend read it before refusing the request', async () => {
+    const bodies: unknown[] = []
+    const { client } = setup({
+      cookies: { [COOKIE]: STALE },
+      handler: async (request, jar) => {
+        if (!isCsrfCall(request)) {
+          const body: unknown = await request.json()
+          bodies.push(body)
+        }
+        return rotated(request, jar)
+      },
+    })
+
+    const { response } = await createClientRequest(client)
+
+    expect(response.status).toBe(200)
+    expect(bodies).toEqual([clientInput, clientInput])
+  })
+
+  it('gives the caller the response to the retry, not the 403', async () => {
+    const answers: Response[] = []
+    const { client } = setup({
+      cookies: { [COOKIE]: STALE },
+      handler: async (request, jar) => {
+        const answer = await rotated(request, jar)
+        if (!isCsrfCall(request)) answers.push(answer)
+        return answer
+      },
+    })
+
+    const { data, error, response } = await createClientRequest(client)
+
+    expect(answers.map((answer) => answer.status)).toEqual([403, 200])
+    expect(response).toBe(answers[1])
+    expect(data).toEqual({ message: 'ok' })
+    expect(error).toBeUndefined()
+  })
+
+  it.each([
+    ['403 csrf_invalid again', csrfInvalid],
+    ['422', () => json({ message: 'Controlla i dati', errors: { name: ['Obbligatorio'] } }, 422)],
+    ['500', () => json({ message: 'Errore interno' }, 500)],
+  ])(
+    'returns the answer to the retry when it is %s, with no third attempt and no second renewal',
+    async (_, secondAnswer) => {
+      const answers: Response[] = []
+      let renewals = 0
+      const { client, requests } = setup({
+        cookies: { [COOKIE]: STALE },
+        handler: (request, jar) => {
+          if (isCsrfCall(request)) {
+            renewals += 1
+            return setCsrfCookie(jar, `token-${String(renewals)}`)
+          }
+          const answer = answers.length === 0 ? csrfInvalid() : secondAnswer()
+          answers.push(answer)
+          return answer
+        },
+      })
+
+      const { response, error } = await createClientRequest(client)
+
+      expect(describeRequests(requests)).toEqual([CREATE, RENEW, CREATE])
+      expect(requests.map((request) => request.headers.get(HEADER))).toEqual([
+        STALE,
+        null,
+        'token-1',
+      ])
+      expect(response).toBe(answers[1])
+      expect(error).toEqual(await secondAnswer().json())
+    },
+  )
+
+  it.each<[string, () => Response]>([
+    [
+      'a { message } body without code (the role is not allowed)',
+      () => json({ message: 'Il tuo ruolo non permette questa azione.' }, 403),
+    ],
+    ['another code', () => json({ message: 'Vietato', code: 'forbidden' }, 403)],
+    [
+      'an HTML body',
+      () =>
+        new Response('<h1>403 csrf_invalid</h1>', {
+          status: 403,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+    ],
+    ['a JSON string instead of an object', () => json('csrf_invalid', 403)],
+    ['an empty body', () => new Response(null, { status: 403 })],
+  ])('neither renews the token nor retries after a 403 with %s', async (_, forbidden) => {
+    const answers: Response[] = []
+    const { client, requests } = setup({
+      cookies: { [COOKIE]: STALE },
+      handler: (request, jar) => {
+        if (isCsrfCall(request)) return setCsrfCookie(jar)
+        const answer = forbidden()
+        answers.push(answer)
+        return answer
+      },
+    })
+
+    const { response } = await createClientRequest(client)
+
+    expect(describeRequests(requests)).toEqual([CREATE])
+    expect(response).toBe(answers[0])
+    expect(response.status).toBe(403)
+  })
+
+  it('never retries a GET, even after a 403 csrf_invalid', async () => {
+    const { client, requests } = setup({ cookies: { [COOKIE]: STALE }, handler: rotated })
+
+    const { response, error } = await client.GET('/api/me')
+
+    expect(pathOf(onlyRequest(requests))).toBe('/api/me')
+    expect(response.status).toBe(403)
+    expect(error).toMatchObject({ code: 'csrf_invalid' })
+  })
+
+  it('makes one /api/auth/csrf call for two requests refused together, and retries both with the new token', async () => {
+    let answerCsrf = () => {}
+    const csrfAnswered = new Promise<void>((resolve) => {
+      answerCsrf = resolve
+    })
+    const { client, requests } = setup({
+      cookies: { [COOKIE]: STALE },
+      handler: async (request, jar) => {
+        // The cookie arrives only with the response, as in a browser
+        if (isCsrfCall(request)) await csrfAnswered
+        return rotated(request, jar)
+      },
+    })
+
+    const first = createClientRequest(client)
+    const second = updateClientRequest(client)
+    // Give both refusals time to reach the renewal
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(describeRequests(requests).sort()).toEqual([RENEW, CREATE, UPDATE].sort())
+    answerCsrf()
+    const results = await Promise.all([first, second])
+
+    expect(requests.filter(isCsrfCall)).toHaveLength(1)
+    expect(
+      requests
+        .filter((request) => !isCsrfCall(request))
+        .map((request) => `${request.method} ${String(request.headers.get(HEADER))}`)
+        .sort(),
+    ).toEqual([`POST ${FRESH}`, `POST ${STALE}`, `PUT ${FRESH}`, `PUT ${STALE}`])
+    expect(results.map((result) => result.response.status)).toEqual([200, 200])
+  })
+
+  it('retries a request refused after another one renewed the token with that token, without renewing again', async () => {
+    let answerUpdate = () => {}
+    const updateAnswered = new Promise<void>((resolve) => {
+      answerUpdate = resolve
+    })
+    const { client, requests } = setup({
+      cookies: { [COOKIE]: STALE },
+      handler: async (request, jar) => {
+        // The refusal of the PUT is late: it arrives once the POST is done
+        if (request.method === 'PUT' && request.headers.get(HEADER) === STALE) await updateAnswered
+        return rotated(request, jar)
+      },
+    })
+
+    const update = updateClientRequest(client)
+    const created = await createClientRequest(client)
+    expect(created.response.status).toBe(200)
+    expect(requests.filter(isCsrfCall)).toHaveLength(1)
+    answerUpdate()
+    const updated = await update
+
+    expect(updated.response.status).toBe(200)
+    expect(describeRequests(requests)).toEqual([UPDATE, CREATE, RENEW, CREATE, UPDATE])
+    expect(requests.map((request) => request.headers.get(HEADER))).toEqual([
+      STALE,
+      STALE,
+      null,
+      FRESH,
+      FRESH,
+    ])
+  })
+
+  it('renews again for a later refusal, once the first renewal is over', async () => {
+    let accepted = 'none-yet'
+    let renewals = 0
+    const { client, requests } = setup({
+      cookies: { [COOKIE]: STALE },
+      handler: (request, jar) => {
+        if (isCsrfCall(request)) {
+          renewals += 1
+          accepted = `token-${String(renewals)}`
+          return setCsrfCookie(jar, accepted)
+        }
+        return request.headers.get(HEADER) === accepted ? json({ message: 'ok' }) : csrfInvalid()
+      },
+    })
+
+    expect((await createClientRequest(client)).response.status).toBe(200)
+    // The backend stops accepting token-1, as when it expires
+    accepted = 'expired'
+    expect((await updateClientRequest(client)).response.status).toBe(200)
+
+    expect(describeRequests(requests)).toEqual([CREATE, RENEW, CREATE, UPDATE, RENEW, UPDATE])
+    expect(requests.map((request) => request.headers.get(HEADER))).toEqual([
+      STALE,
+      null,
+      'token-1',
+      'token-1',
+      null,
+      'token-2',
+    ])
+  })
+
+  it.each<[string, Handler]>([
+    ['answers 204 without setting the cookie', () => new Response(null, { status: 204 })],
+    ['answers 500', () => json({ message: 'Errore interno' }, 500)],
+    ['fails with a network error', () => Promise.reject(new TypeError('Failed to fetch'))],
+  ])('returns the first 403 when /api/auth/csrf %s', async (_, csrfAnswer) => {
+    const refusals: Response[] = []
+    const { client, requests } = setup({
+      cookies: { [COOKIE]: STALE },
+      handler: (request, jar) => {
+        if (isCsrfCall(request)) return csrfAnswer(request, jar)
+        const refusal = csrfInvalid()
+        refusals.push(refusal)
+        return refusal
+      },
+    })
+
+    const { response, error } = await createClientRequest(client)
+
+    expect(describeRequests(requests)).toEqual([CREATE, RENEW])
+    expect(response).toBe(refusals[0])
+    expect(error).toEqual({ message: 'Token di sicurezza non valido', code: 'csrf_invalid' })
+  })
+
+  it('calls onUnauthorized once when the retry answers 401 outside /api/auth/', async () => {
+    const { client, requests, onUnauthorized } = setup({
+      cookies: { [COOKIE]: STALE },
+      handler: (request, jar) => {
+        if (isCsrfCall(request)) return setCsrfCookie(jar)
+        if (request.headers.get(HEADER) !== FRESH) return csrfInvalid()
+        return json({ message: 'Sessione scaduta' }, 401)
+      },
+    })
+
+    const { response, error } = await createClientRequest(client)
+
+    expect(describeRequests(requests)).toEqual([CREATE, RENEW, CREATE])
+    expect(response.status).toBe(401)
+    expect(error).toEqual({ message: 'Sessione scaduta' })
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call onUnauthorized when the retried logout answers 401', async () => {
+    const { client, requests, onUnauthorized } = setup({
+      cookies: { [COOKIE]: STALE },
+      handler: (request, jar) => {
+        if (isCsrfCall(request)) return setCsrfCookie(jar)
+        if (request.headers.get(HEADER) !== FRESH) return csrfInvalid()
+        return json({ message: 'Non autenticato' }, 401)
+      },
+    })
+
+    const { response } = await client.POST('/api/auth/logout')
+
+    expect(describeRequests(requests)).toEqual([
+      'POST /api/auth/logout',
+      RENEW,
+      'POST /api/auth/logout',
+    ])
+    expect(response.status).toBe(401)
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
 })
 
 describe('createApiClient: 401 handling', () => {

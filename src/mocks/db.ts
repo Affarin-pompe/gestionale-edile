@@ -1,8 +1,12 @@
-import { seedClients } from './data'
+import { seedClients, seedClientsWithDocuments } from './data'
 
 /** The mock backend's state. It lives in memory and starts over on every page load. */
 export const db = {
   clients: seedClients(),
+  /** The version of each client by id, for ETag and If-Match; missing means 1. */
+  clientVersions: new Map<string, number>(),
+  /** Ids of the clients that cannot be deleted. */
+  clientsWithDocuments: seedClientsWithDocuments(),
   /** Failed logins by email, for the rate limit. */
   failedLogins: new Map<string, { count: number; lockedUntil: number }>(),
 }
@@ -10,5 +14,7 @@ export const db = {
 /** Back to the seed data; the test setup calls it after every test. */
 export function resetDb() {
   db.clients = seedClients()
+  db.clientVersions.clear()
+  db.clientsWithDocuments = seedClientsWithDocuments()
   db.failedLogins.clear()
 }

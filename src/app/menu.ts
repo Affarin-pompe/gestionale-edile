@@ -38,17 +38,27 @@ export const menu: MenuGroup[] = [
   {
     label: 'menu.work',
     items: [
-      { label: 'menu.quotes', icon: FileText, path: 'preventivi', soon: true },
-      { label: 'menu.estimates', icon: Ruler, path: 'computi', soon: true },
-      { label: 'menu.sites', icon: Construction, path: 'cantieri', soon: true },
-      { label: 'menu.reports', icon: ClipboardList, path: 'rapportini', soon: true },
+      { label: 'menu.quotes', icon: FileText, path: 'preventivi', permission: 'quotes.view' },
+      { label: 'menu.estimates', icon: Ruler, path: 'computi', permission: 'estimates.view' },
+      { label: 'menu.sites', icon: Construction, path: 'cantieri', permission: 'sites.view' },
+      {
+        label: 'menu.reports',
+        icon: ClipboardList,
+        path: 'rapportini',
+        permission: 'reports.view',
+      },
     ],
   },
   {
     label: 'menu.admin',
     items: [
-      { label: 'menu.deadlines', icon: CalendarClock, path: 'scadenziario', soon: true },
-      { label: 'menu.costs', icon: Wallet, path: 'costi', soon: true },
+      {
+        label: 'menu.deadlines',
+        icon: CalendarClock,
+        path: 'scadenziario',
+        permission: 'deadlines.view',
+      },
+      { label: 'menu.costs', icon: Wallet, path: 'costi', permission: 'costs.view' },
     ],
   },
   {
@@ -60,9 +70,24 @@ export const menu: MenuGroup[] = [
         path: 'anagrafiche/clienti',
         permission: 'clients.view',
       },
-      { label: 'menu.suppliers', icon: Handshake, path: 'anagrafiche/fornitori', soon: true },
-      { label: 'menu.employees', icon: Contact, path: 'anagrafiche/dipendenti', soon: true },
-      { label: 'menu.vehicles', icon: Truck, path: 'anagrafiche/mezzi', soon: true },
+      {
+        label: 'menu.suppliers',
+        icon: Handshake,
+        path: 'anagrafiche/fornitori',
+        permission: 'suppliers.view',
+      },
+      {
+        label: 'menu.employees',
+        icon: Contact,
+        path: 'anagrafiche/dipendenti',
+        permission: 'employees.view',
+      },
+      {
+        label: 'menu.vehicles',
+        icon: Truck,
+        path: 'anagrafiche/mezzi',
+        permission: 'vehicles.view',
+      },
     ],
   },
 ]

@@ -149,7 +149,9 @@ Il primo esempio è il cliente: `src/features/clients/` (scheda, nuovo, modifica
 - **Aspetto.** Come in Metronic: ogni `FormSection` è una card con il titolo nell'intestazione; dove la card è abbastanza larga l'etichetta sta a sinistra del campo, su telefono sopra. Il form è largo al massimo 620px e i pulsanti stanno in fondo a destra. Nella scheda ogni sezione è una card.
 - **Dopo il salvataggio** un avviso (sonner) conferma e si apre la scheda. La scheda prende la risposta del backend, e gli elenchi si ricaricano.
 - **Scheda e modifica** caricano il record nel loader della route, prima di aprirsi. Se l'API risponde 404 (record di un'altra azienda o inesistente), compare la pagina "non trovato o non accessibile" dentro il layout. Per questo `routes.ts` del modulo è una funzione che riceve il `queryClient`.
-- **Limiti attuali:** si esce da un form con modifiche non salvate senza nessun avviso, e non c'è controllo di modifiche fatte nel frattempo da altri.
+- **Modifiche fatte nel frattempo da altri.** La scheda tiene, insieme al record, la versione ricevuta dal backend (header `ETag`); modifica, archiviazione, ripristino ed eliminazione la rimandano in `If-Match`. Se nel frattempo qualcuno ha salvato, il backend risponde 412: `EntityForm` lo dice sopra i pulsanti, senza perdere quello che si è scritto, e offre "Ricarica", che porta nel form la versione nuova.
+- **Archiviare ed eliminare.** Dalla scheda, con i permessi giusti (`clients.update` per archiviare e ripristinare, `clients.delete` per eliminare). L'eliminazione chiede conferma; se il cliente ha documenti collegati (409) la finestra lo spiega e propone di archiviarlo. Gli archiviati si vedono nell'elenco con il filtro "Stato".
+- **Limiti attuali:** si esce da un form con modifiche non salvate senza nessun avviso.
 
 ## Struttura del codice
 
@@ -186,8 +188,8 @@ Regole:
 
 È la parte che permette di lavorare in parallelo. Il dettaglio della proposta è in [ADR-0003](adr/0003-contratto-api-e-sessione.md).
 
-- **Un file OpenAPI** (`api/openapi.yaml`) è l'unica fonte: il backend lo implementa, il frontend ne genera i tipi e le risposte finte. Si scrive prima delle schermate, modulo per modulo. I tipi si rigenerano con `npm run api:types` e la CI fallisce se non sono aggiornati. Il primo pezzo copre accesso, `/api/me` e Clienti.
-- **Dove vive il file [da concordare]:** per ora in questo repository. Se i repository di frontend e backend sono separati, il contratto sta in uno dei due e l'altro lo prende da lì.
+- **Un file OpenAPI** è l'unica fonte: il backend lo implementa, il frontend ne genera i tipi e le risposte finte. Si scrive prima delle schermate, modulo per modulo. I tipi si rigenerano con `npm run api:types` e la CI fallisce se non sono aggiornati. Il primo pezzo copre accesso, `/api/me` e Clienti.
+- **Dove vive il file:** la fonte è `contract/openapi.yaml` nel repository del backend. Qui `api/openapi.yaml` ne è una copia, che non si modifica a mano ([ADR-0003](adr/0003-contratto-api-e-sessione.md)).
 - **Accesso:** cookie di sessione sullo stesso dominio, con protezione CSRF. È più sicuro di un token salvato nel browser, che qualunque script nella pagina potrebbe leggere. Per la CSRF il backend imposta un cookie `XSRF-TOKEN` leggibile dalla pagina, e il frontend lo ricopia nell'header `X-XSRF-TOKEN` delle richieste che modificano dati.
 - **Azienda nel percorso:** `/api/companies/{company}/sites`.
 - **`GET /api/me`** restituisce l'utente, le sue aziende e, per ognuna, ruolo e permessi. L'interfaccia lo usa per il menu e per nascondere azioni.

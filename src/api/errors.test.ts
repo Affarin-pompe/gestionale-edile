@@ -21,6 +21,7 @@ const clientInput: components['schemas']['ClientInput'] = {
   postal_code: null,
   city: null,
   province: null,
+  country: 'IT',
   notes: null,
 }
 
@@ -84,6 +85,7 @@ describe('unwrap', () => {
     const created: ClientRecord = {
       ...clientInput,
       id: '0b8f6a52-3c1e-4d7a-9f20-6f1b2c3d4e5f',
+      archived_at: null,
       created_at: '2026-11-02T10:00:00Z',
       updated_at: '2026-11-02T10:00:00Z',
     }

@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input'
 import type { MessageId } from '@/i18n/it'
 
 export function FilterBar({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap items-center gap-2">{children}</div>
+  // min-w-0: in the grid of the card header, a long option of a select must not widen it
+  return <div className="flex min-w-0 flex-wrap items-center gap-2">{children}</div>
 }
 
 const TYPING_PAUSE_MS = 300
