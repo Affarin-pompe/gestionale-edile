@@ -3,12 +3,12 @@ info:
   title: Gestionale edile API
   version: 0.1.0
   description: |
-    Contratto tra frontend e backend: è l'unica fonte. Ogni cambio di API passa prima da qui.
-    Proposta da concordare con il backend: vedi docs/adr/0003-contratto-api-e-sessione.md.
+    Contratto tra frontend e backend.
 
-    COPIA DEL BACKEND: è la PR #7 di gestionale-edile (commit 660b946) con le modifiche
-    proposte nel commento del 4 novembre 2026. Quando la PR viene aggiornata, si sostituisce
-    con la versione concordata.
+    COPIA DEL CONTRATTO DEL BACKEND. La fonte è contract/openapi.yaml nel repository del
+    backend: ogni cambio di API si fa lì, e questo file si aggiorna ricopiandolo, mai a mano.
+    Da qui si generano i tipi (npm run api:types, src/api/schema.d.ts) e la CI controlla che
+    corrispondano. Le scelte di fondo sono in docs/adr/0003-contratto-api-e-sessione.md.
 
     Regole comuni:
     - Sessione con cookie HttpOnly, frontend e API sullo stesso dominio.
@@ -58,7 +58,10 @@ paths:
       operationId: getCsrfCookie
       summary: Imposta il cookie XSRF-TOKEN
       description: |
-        Il frontend lo chiama quando il cookie manca, prima della prima richiesta che modifica dati.
+        Il frontend lo chiama quando il cookie manca, prima della prima richiesta che modifica dati,
+        e anche dopo una risposta 403 con code csrf_invalid (token scaduto o di un'altra
+        sessione): dopo il rinnovo riprova la richiesta una volta sola, e se fallisce ancora
+        l'errore resta. Con più richieste rifiutate insieme basta un solo rinnovo.
         Il backend rinnova il token a ogni accesso e uscita, insieme alla sessione.
       security: []
       responses:

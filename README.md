@@ -44,4 +44,4 @@ Tutto ciò che il frontend legge da `import.meta.env` finisce nel browser ed è 
 - **Il repository è pubblico.** Niente template ThemeForest, né altro materiale con una licenza che ne vieti la pubblicazione ([ADR-0001](docs/adr/0001-template-ui-e-repository-pubblico.md)). Niente segreti, né nomi di sistemi interni.
 - **L'interfaccia nasconde, il backend blocca.** Ogni permesso va controllato anche lato server.
 - **Importi e quantità arrivano come stringhe.** Non si calcolano con i numeri decimali di JavaScript.
-- **Il contratto API si cambia prima nel file OpenAPI** (`api/openapi.yaml`), poi nel codice.
+- **Il contratto API si cambia prima nel file OpenAPI del backend** (`contract/openapi.yaml`), poi si ricopia in `api/openapi.yaml` e si cambia il codice.

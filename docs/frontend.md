@@ -188,8 +188,8 @@ Regole:
 
 È la parte che permette di lavorare in parallelo. Il dettaglio della proposta è in [ADR-0003](adr/0003-contratto-api-e-sessione.md).
 
-- **Un file OpenAPI** (`api/openapi.yaml`) è l'unica fonte: il backend lo implementa, il frontend ne genera i tipi e le risposte finte. Si scrive prima delle schermate, modulo per modulo. I tipi si rigenerano con `npm run api:types` e la CI fallisce se non sono aggiornati. Il primo pezzo copre accesso, `/api/me` e Clienti.
-- **Dove vive il file [da concordare]:** per ora in questo repository. Se i repository di frontend e backend sono separati, il contratto sta in uno dei due e l'altro lo prende da lì.
+- **Un file OpenAPI** è l'unica fonte: il backend lo implementa, il frontend ne genera i tipi e le risposte finte. Si scrive prima delle schermate, modulo per modulo. I tipi si rigenerano con `npm run api:types` e la CI fallisce se non sono aggiornati. Il primo pezzo copre accesso, `/api/me` e Clienti.
+- **Dove vive il file:** la fonte è `contract/openapi.yaml` nel repository del backend. Qui `api/openapi.yaml` ne è una copia, che non si modifica a mano ([ADR-0003](adr/0003-contratto-api-e-sessione.md)).
 - **Accesso:** cookie di sessione sullo stesso dominio, con protezione CSRF. È più sicuro di un token salvato nel browser, che qualunque script nella pagina potrebbe leggere. Per la CSRF il backend imposta un cookie `XSRF-TOKEN` leggibile dalla pagina, e il frontend lo ricopia nell'header `X-XSRF-TOKEN` delle richieste che modificano dati.
 - **Azienda nel percorso:** `/api/companies/{company}/sites`.
 - **`GET /api/me`** restituisce l'utente, le sue aziende e, per ognuna, ruolo e permessi. L'interfaccia lo usa per il menu e per nascondere azioni.
